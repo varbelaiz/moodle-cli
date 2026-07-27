@@ -1,0 +1,39 @@
+[
+  {
+    "id": 1,
+    "username": "profe",
+    "firstname": "Ada",
+    "lastname": "Docente",
+    "fullname": "Ada Docente",
+    "email": "ada.docente@example.edu",
+    "lastaccess": 1783047600,
+    "lastcourseaccess": 1783047600,
+    "roles": [
+      {"roleid": 3, "name": "", "shortname": "editingteacher", "sortorder": 0}
+    ]
+  },
+  {
+    "id": 2,
+    "username": "alumna",
+    "firstname": "Grace",
+    "lastname": "Estudiante",
+    "fullname": "Grace Estudiante",
+    "email": "grace.estudiante@example.edu",
+    "lastaccess": 1783047600,
+    "lastcourseaccess": 1783040000,
+    "roles": [
+      {"roleid": 5, "name": "", "shortname": "student", "sortorder": 0}
+    ]
+  },
+  {
+    "id": 3,
+    "username": "biblioteca",
+    "firstname": "Biblioteca",
+    "lastname": "Central",
+    "fullname": "Biblioteca Central",
+    "email": "biblioteca@example.edu",
+    "lastaccess": 0,
+    "lastcourseaccess": 0,
+    "roles": []
+  }
+]

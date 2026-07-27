@@ -1,0 +1,117 @@
+[
+  {
+    "id": 900,
+    "name": "General",
+    "visible": 1,
+    "summary": "",
+    "summaryformat": 1,
+    "section": 0,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 1,
+        "name": "Avisos",
+        "instance": 1,
+        "modname": "forum",
+        "url": "https://campus.example.edu/mod/forum/view.php?id=1",
+        "visible": 1,
+        "uservisible": true
+      },
+      {
+        "id": 2,
+        "name": "Programa de la materia",
+        "instance": 2,
+        "modname": "resource",
+        "url": "https://campus.example.edu/mod/resource/view.php?id=2",
+        "visible": 1,
+        "uservisible": true,
+        "contents": [
+          {
+            "type": "file",
+            "filename": "Programa  - Taller.pdf.pdf",
+            "filepath": "/",
+            "filesize": 171850,
+            "fileurl": "https://campus.example.edu/webservice/pluginfile.php/1/mod_resource/content/5/Programa.pdf",
+            "timemodified": 1783047600,
+            "mimetype": "application/pdf",
+            "isexternalfile": false
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "name": "Material Bibliográfico Digital",
+        "instance": 3,
+        "modname": "folder",
+        "url": "https://campus.example.edu/mod/folder/view.php?id=3",
+        "visible": 1,
+        "uservisible": true,
+        "contents": [
+          {
+            "type": "file",
+            "filename": "_Carátula licencia.pdf",
+            "filepath": "/",
+            "filesize": 860791,
+            "fileurl": "https://campus.example.edu/webservice/pluginfile.php/2/mod_folder/content/0/caratula.pdf",
+            "timemodified": 1783047600,
+            "mimetype": "application/pdf",
+            "isexternalfile": true
+          },
+          {
+            "type": "file",
+            "filename": "Cap 1.pdf",
+            "filepath": "/unidad-1/",
+            "filesize": 2048,
+            "fileurl": "https://campus.example.edu/webservice/pluginfile.php/2/mod_folder/content/0/cap1.pdf",
+            "timemodified": 1783047600,
+            "mimetype": "application/pdf",
+            "isexternalfile": true
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "name": "Slack de la Materia",
+        "instance": 4,
+        "modname": "url",
+        "url": "https://campus.example.edu/mod/url/view.php?id=4",
+        "visible": 1,
+        "uservisible": true,
+        "contents": [
+          {
+            "type": "url",
+            "filename": "Slack de la Materia",
+            "filepath": null,
+            "filesize": 0,
+            "fileurl": "https://slack.example.com/join",
+            "timemodified": 0,
+            "mimetype": null,
+            "isexternalfile": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 901,
+    "name": "Entregas",
+    "visible": 1,
+    "summary": "",
+    "summaryformat": 1,
+    "section": 1,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 5,
+        "name": "Trabajo Final",
+        "instance": 5,
+        "modname": "assign",
+        "url": "https://campus.example.edu/mod/assign/view.php?id=5",
+        "visible": 1,
+        "uservisible": true
+      }
+    ]
+  }
+]

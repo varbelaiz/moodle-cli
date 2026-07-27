@@ -1,0 +1,207 @@
+"""HTTP client for the Moodle web-service API."""
+
+from __future__ import annotations
+
+from types import TracebackType
+from typing import Any
+
+import httpx
+
+from moodle_cli.errors import MoodleAPIError, MoodleError
+from moodle_cli.models import Course, Participant, Section, SiteInfo
+
+REST_PATH = "/webservice/rest/server.php"
+
+#: Public filter name -> Moodle ``classification`` value, read off the dashboard dropdown.
+VIEWS: dict[str, str] = {
+    "all": "all",
+    "all-including-hidden": "allincludinghidden",
+    "in-progress": "inprogress",
+    "future": "future",
+    "past": "past",
+    "starred": "favourites",
+    "hidden": "hidden",
+}
+
+#: Public sort name -> Moodle ``sort`` value. The last-accessed value is a raw SQL ORDER BY
+#: fragment that Moodle whitelists server-side; it stays encapsulated here.
+SORTS: dict[str, str] = {
+    "name": "fullname",
+    "last-accessed": "ul.timeaccess desc",
+}
+
+_PARTICIPANT_PAGE_SIZE = 250
+
+
+def _flatten_params(params: dict[str, Any], prefix: str = "") -> dict[str, str]:
+    """Encode nested structures the way Moodle's REST server expects.
+
+    ``{"options": [{"name": "limitnumber", "value": 5}]}`` becomes
+    ``{"options[0][name]": "limitnumber", "options[0][value]": "5"}``.
+    """
+    flat: dict[str, str] = {}
+    for key, value in params.items():
+        full_key = f"{prefix}[{key}]" if prefix else str(key)
+        if isinstance(value, dict):
+            flat.update(_flatten_params(value, full_key))
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                indexed = f"{full_key}[{index}]"
+                if isinstance(item, dict):
+                    flat.update(_flatten_params(item, indexed))
+                else:
+                    flat[indexed] = _scalar(item)
+        elif value is not None:
+            flat[full_key] = _scalar(value)
+    return flat
+
+
+def _scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
+
+
+class MoodleClient:
+    """Typed access to the subset of the Moodle API this tool needs.
+
+    Every response is inspected for an error payload before use: the campus answers failed
+    calls with HTTP 200, so status codes alone would let errors through as data.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        *,
+        client: httpx.Client | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self._owns_client = client is None
+        self._http = client or httpx.Client(timeout=timeout, follow_redirects=True)
+
+    def __enter__(self) -> MoodleClient:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._http.close()
+
+    # -- transport ---------------------------------------------------------------
+
+    def _call(self, function: str, **params: Any) -> Any:
+        payload = {
+            "wstoken": self.token,
+            "moodlewsrestformat": "json",
+            "wsfunction": function,
+            **params,
+        }
+        response = self._http.post(f"{self.base_url}{REST_PATH}", data=_flatten_params(payload))
+        response.raise_for_status()
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise MoodleError(f"{function} returned a non-JSON response") from exc
+        check_api_error(body, function=function)
+        return body
+
+    # -- endpoints ---------------------------------------------------------------
+
+    def get_site_info(self) -> SiteInfo:
+        return SiteInfo.model_validate(self._call("core_webservice_get_site_info"))
+
+    def list_courses(self, view: str = "all", sort: str = "name") -> list[Course]:
+        """List enrolled courses.
+
+        ``view`` and ``sort`` take the public names in :data:`VIEWS` and :data:`SORTS`.
+        """
+        classification = _lookup(VIEWS, view, "view")
+        sort_value = _lookup(SORTS, sort, "sort")
+        body = self._call(
+            "core_course_get_enrolled_courses_by_timeline_classification",
+            classification=classification,
+            limit=0,
+            offset=0,
+            sort=sort_value,
+        )
+        return [Course.model_validate(c) for c in body.get("courses", [])]
+
+    def get_course_contents(self, course_id: int) -> list[Section]:
+        body = self._call("core_course_get_contents", courseid=course_id)
+        return [Section.model_validate(s) for s in body]
+
+    def get_participants(self, course_id: int) -> list[Participant]:
+        """Fetch every enrolled user, paging so large courses are not silently truncated."""
+        participants: list[Participant] = []
+        offset = 0
+        while True:
+            body = self._call(
+                "core_enrol_get_enrolled_users",
+                courseid=course_id,
+                options=[
+                    {"name": "limitfrom", "value": offset},
+                    {"name": "limitnumber", "value": _PARTICIPANT_PAGE_SIZE},
+                ],
+            )
+            page = [Participant.model_validate(u) for u in body]
+            participants.extend(page)
+            if len(page) < _PARTICIPANT_PAGE_SIZE:
+                return participants
+            offset += _PARTICIPANT_PAGE_SIZE
+
+    # -- convenience -------------------------------------------------------------
+
+    def resolve_course(self, reference: str) -> Course:
+        """Resolve a course id or shortname to a course.
+
+        Shortnames are matched case-insensitively, exactly first and then by prefix, so
+        ``IOS460`` finds ``IOS460 - 123246``.
+        """
+        courses = self.list_courses(view="all-including-hidden")
+        if reference.isdigit():
+            wanted = int(reference)
+            for course in courses:
+                if course.id == wanted:
+                    return course
+            raise MoodleError(f"No enrolled course with id {reference}")
+
+        needle = reference.casefold().strip()
+        for course in courses:
+            if course.shortname.casefold() == needle:
+                return course
+
+        matches = [c for c in courses if c.shortname.casefold().startswith(needle)]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            raise MoodleError(f"No enrolled course matching {reference!r}")
+        names = ", ".join(sorted(c.shortname for c in matches))
+        raise MoodleError(f"{reference!r} is ambiguous; matches: {names}")
+
+
+def check_api_error(body: Any, *, function: str | None = None) -> None:
+    """Raise if a decoded response body is an error payload rather than data."""
+    if isinstance(body, dict) and ("exception" in body or "errorcode" in body):
+        raise MoodleAPIError(
+            errorcode=str(body.get("errorcode", "unknown")),
+            message=str(body.get("message") or body.get("error") or "Request failed"),
+            function=function,
+        )
+
+
+def _lookup(table: dict[str, str], key: str, label: str) -> str:
+    try:
+        return table[key]
+    except KeyError:
+        options = ", ".join(sorted(table))
+        raise ValueError(f"Unknown {label} {key!r}. Valid options: {options}") from None

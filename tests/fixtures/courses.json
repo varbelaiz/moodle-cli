@@ -1,0 +1,59 @@
+{
+  "courses": [
+    {
+      "id": 101,
+      "fullname": "IOS460 - Taller de Desarrollo de Software (grupo 1) G:1 Teó 1 - 2do. Semestre 2026",
+      "shortname": "IOS460 - 123246",
+      "idnumber": "",
+      "summary": "",
+      "summaryformat": 1,
+      "startdate": 1783047600,
+      "enddate": 0,
+      "visible": true,
+      "viewurl": "https://campus.example.edu/course/view.php?id=101",
+      "progress": null,
+      "hasprogress": false,
+      "isfavourite": true,
+      "hidden": false,
+      "showshortname": false,
+      "coursecategory": "Ingeniería en Inteligencia Artificial"
+    },
+    {
+      "id": 102,
+      "fullname": "I312 - Bases de Datos (grupo 1) G:1 Teó 1 - 2do. Semestre 2025",
+      "shortname": "I312 - 106931",
+      "idnumber": "",
+      "summary": "",
+      "summaryformat": 1,
+      "startdate": 1752807600,
+      "enddate": 0,
+      "visible": true,
+      "viewurl": "https://campus.example.edu/course/view.php?id=102",
+      "progress": null,
+      "hasprogress": false,
+      "isfavourite": false,
+      "hidden": false,
+      "showshortname": false,
+      "coursecategory": "Ingeniería en Inteligencia Artificial"
+    },
+    {
+      "id": 103,
+      "fullname": "I310 - Redes y Comunicación (grupo 1) G:1 Teó 1 - 2do. Semestre 2025",
+      "shortname": "I310 - 106934",
+      "idnumber": "",
+      "summary": "",
+      "summaryformat": 1,
+      "startdate": 1752807600,
+      "enddate": 0,
+      "visible": true,
+      "viewurl": "https://campus.example.edu/course/view.php?id=103",
+      "progress": null,
+      "hasprogress": false,
+      "isfavourite": false,
+      "hidden": false,
+      "showshortname": false,
+      "coursecategory": "Ingeniería en Inteligencia Artificial"
+    }
+  ],
+  "nextoffset": 3
+}
