@@ -219,3 +219,6 @@ __marimo__/
 
 # Playwright MCP exploration artifacts (contain campus page snapshots + participant data)
 .playwright-mcp/
+
+# Personal, non-committed Claude Code instructions
+CLAUDE.local.md
