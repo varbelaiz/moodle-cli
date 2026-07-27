@@ -21,7 +21,13 @@ from mcp.server.fastmcp import FastMCP
 from moodle_cli.auth import resolve_token
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
-from moodle_cli.downloads import DownloadStatus, download_file, plan_downloads, sanitize
+from moodle_cli.downloads import (
+    DownloadStatus,
+    download_file,
+    iter_course_files,
+    plan_downloads,
+    sanitize,
+)
 from moodle_cli.errors import MoodleError
 
 View = Literal["all", "all-including-hidden", "in-progress", "future", "past", "starred", "hidden"]
@@ -105,14 +111,22 @@ def get_course_contents(course: str) -> dict[str, Any]:
 def download_course_files(
     course: str,
     output_dir: str | None = None,
-    section: int | None = None,
-    module_type: str | None = None,
+    sections: list[int] | None = None,
+    module_types: list[str] | None = None,
+    files: list[str] | None = None,
+    match: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Download a course's files to disk, mirroring its section structure.
 
     Returns a manifest of file paths and sizes, never file contents. Read the downloaded
     files afterwards with normal filesystem tools if their contents are needed.
+
+    Selectors narrow what is fetched and compose by intersection: `sections` and
+    `module_types` by structure, `files` and `match` by filename. `files` holds exact
+    filenames as returned by get_course_contents; a name that matches nothing is an error,
+    so a wrong name fails instead of silently downloading nothing. `match` holds
+    case-insensitive globs such as "*.pdf".
 
     `output_dir` defaults to ./<course shortname>/. Set `dry_run` to preview the plan.
     """
@@ -131,9 +145,23 @@ def download_course_files(
     planned = plan_downloads(
         contents,
         root,
-        only_sections={section} if section is not None else None,
-        only_modtypes={module_type} if module_type else None,
+        only_sections=set(sections) if sections else None,
+        only_modtypes=set(module_types) if module_types else None,
+        only_names=set(files) if files else None,
+        only_patterns=match or None,
     )
+
+    if files:
+        selected = {p.file.filename for p in planned}
+        unknown = [name for name in files if name not in selected]
+        if unknown:
+            in_course = {f.filename for _, _, f in iter_course_files(contents)}
+
+            def reason(name: str) -> str:
+                return "excluded by another selector" if name in in_course else "not in this course"
+
+            detail = ", ".join(f"{name!r} ({reason(name)})" for name in unknown)
+            raise ValueError(f"No such file: {detail}")
 
     manifest: list[dict[str, Any]] = []
     if dry_run:
