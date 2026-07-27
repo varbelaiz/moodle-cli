@@ -110,6 +110,10 @@ def _format_epoch(value: int) -> str:
     return datetime.fromtimestamp(value).strftime("%Y-%m-%d") if value else "-"
 
 
+def _plural(count: int, noun: str) -> str:
+    return noun if count == 1 else f"{noun}s"
+
+
 def _format_year(value: int) -> str:
     """Start year is the only recency signal available: no course here sets an end date."""
     return datetime.fromtimestamp(value).strftime("%Y") if value else "-"
@@ -245,19 +249,20 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
         _emit_json([s.model_dump(mode="json") for s in sections])
         return
 
-    console.print(f"[bold]{resolved.shortname}[/bold] — {resolved.fullname}\n")
+    console.print(f"[bold]{escape(resolved.shortname)}[/bold] — {escape(resolved.fullname)}\n")
     for section in sections:
         files = sum(len(m.files) for m in section.modules)
-        suffix = f"  [dim]({files} files)[/dim]" if files else ""
-        console.print(f"[bold cyan]{section.section:>2}. {section.name}[/bold cyan]{suffix}")
+        suffix = f"  [dim]({files} {_plural(files, 'file')})[/dim]" if files else ""
+        console.print(
+            f"[bold cyan]{section.section:>2}. {escape(section.name)}[/bold cyan]{suffix}"
+        )
         for module in section.modules:
             marker = "" if module.uservisible else " [dim](hidden)[/dim]"
-            console.print(f"     [dim]{module.modname:<10}[/dim] {module.name}{marker}")
+            console.print(f"     [dim]{module.modname:<10}[/dim] {escape(module.name)}{marker}")
             for file in module.files:
-                console.print(
-                    f"       [green]-[/green] {file.filename} "
-                    f"[dim]({_human_size(file.filesize)})[/dim]"
-                )
+                # Size leads so a long filename wrapping cannot orphan it on its own line.
+                size = _human_size(file.filesize).rjust(9)
+                console.print(f"       [dim]{size}[/dim]  {escape(file.filename)}")
         console.print()
 
 
@@ -306,7 +311,8 @@ def course_download(
 
     total = sum(p.file.filesize for p in planned)
     console.print(
-        f"[bold]{resolved.shortname}[/bold]: {len(planned)} files, {_human_size(total)} -> {root}/"
+        f"[bold]{resolved.shortname}[/bold]: {len(planned)} "
+        f"{_plural(len(planned), 'file')}, {_human_size(total)} -> {root}/"
     )
 
     if dry_run:
