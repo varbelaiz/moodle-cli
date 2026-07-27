@@ -1,120 +1,252 @@
 # moodle-cli
 
-A CLI and MCP server for a Moodle campus. Lists your courses, reads their contents,
-downloads the material, and shows who is enrolled — over Moodle's web-service API, with no
-browser and no HTML scraping.
+Command line client and MCP server for a Moodle campus. Lists your courses, reads their
+contents, downloads the material, and shows who is enrolled — over Moodle's web-service
+API, with no browser and no HTML scraping.
 
-Built against Universidad de San Andrés's campus (Moodle 5.1), but the client is generic:
-point `MOODLE_URL` at any Moodle instance with web services enabled.
+Works with any Moodle instance that has web services and the mobile service enabled.
+
+- [Install](#install)
+- [Authentication](#authentication)
+- [Command reference](#command-reference)
+  - [`moodle auth`](#moodle-auth)
+  - [`moodle courses list`](#moodle-courses-list)
+  - [`moodle course contents`](#moodle-course-contents)
+  - [`moodle course download`](#moodle-course-download)
+  - [`moodle course participants`](#moodle-course-participants)
+- [MCP server](#mcp-server)
+- [Configuration](#configuration)
+- [Exit codes](#exit-codes)
+- [Things worth knowing](#things-worth-knowing)
+- [Development](#development)
 
 ## Install
 
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
 ```bash
+git clone https://github.com/varbelaiz/moodle-cli
+cd moodle-cli
 uv sync
 ```
 
-## Authenticate
+Commands below are written as `moodle …`. Without installing the package on your PATH,
+prefix them with `uv run`, as in `uv run moodle courses list`.
 
-Set the campus URL and your credentials, then mint a token:
+## Authentication
 
-```bash
-cp .env.example .env   # then fill in MOODLE_URL, MOODLE_USER, MOODLE_PASS
-uv run moodle auth login
-```
-
-`auth login` exchanges your password for a long-lived web-service token and stores it in the
-system keyring. **Once that succeeds you can delete `MOODLE_PASS` from `.env`** — nothing
-else needs it.
-
-Credential resolution order is `MOODLE_TOKEN` → keyring → mint from `MOODLE_USER`/`MOODLE_PASS`,
-so an explicitly exported token always wins.
+Point the tool at your campus and log in once:
 
 ```bash
-uv run moodle auth status    # who am I, and what can this token do
-uv run moodle auth logout    # drop the stored token
+export MOODLE_URL=https://campus.example.edu
+moodle auth login
 ```
 
-## Use
+`auth login` exchanges your password for a long-lived web-service token and stores it in
+the system keyring. The password is prompted for, never taken as an argument, and is not
+needed again afterwards.
+
+If your campus uses SSO only and you have no local Moodle password, `login/token.php`
+cannot mint a token for you. Where the site allows it, you can create one by hand under
+Preferences → Security keys in your Moodle profile, then set `MOODLE_TOKEN`.
+
+## Command reference
+
+Every read command accepts `--json`, which prints machine-readable output instead of a
+table.
+
+Commands that take a course accept either its numeric id or a shortname prefix:
+`moodle course contents 29272` and `moodle course contents IOS460` are equivalent. A prefix
+matching more than one course is an error listing the candidates.
+
+### `moodle auth`
+
+| Command | Description |
+| --- | --- |
+| `moodle auth login [-u USERNAME]` | Mint a token and store it in the keyring. Prompts for the password. |
+| `moodle auth status` | Show who the stored token belongs to, and what it can do. |
+| `moodle auth logout` | Delete the stored token. |
+
+```console
+$ moodle auth status
+Authenticated as Ada Lovelace (id 63643)
+  site: Universidad de Ejemplo - Campus Virtual
+  functions available: 439
+  file downloads allowed: True
+```
+
+### `moodle courses list`
+
+Lists your enrolled courses.
+
+| Option | Values | Default | Description |
+| --- | --- | --- | --- |
+| `--view` | `all`, `all-including-hidden`, `in-progress`, `future`, `past`, `starred`, `hidden` | `all` | Which courses to include. |
+| `--sort` | `name`, `last-accessed` | `name` | Ordering. |
+| `--json` | | | JSON output. |
+
+```console
+$ moodle courses list --view starred --sort last-accessed
+                       5 courses (starred, by last-accessed)
+┏━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━┓
+┃    id ┃ shortname       ┃ name                                      ┃ year ┃ * ┃
+┡━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━┩
+│ 29272 │ IOS460 - 123246 │ Taller de Desarrollo de Software (grupo…  │ 2026 │ * │
+│ 29273 │ IOS465 - 123247 │ Computación cuántica (grupo 1) G:1 Teó 1  │ 2026 │ * │
+└───────┴─────────────────┴───────────────────────────────────────────┴──────┴───┘
+```
+
+The `--json` output carries more fields than the table, including `category`, `startdate`,
+`enddate`, `progress`, `hidden` and `viewurl`.
+
+### `moodle course contents`
+
+Shows a course's sections, activities and downloadable files.
+
+```console
+$ moodle course contents IOS460
+IOS460 - 123246 — Taller de Desarrollo de Software
+
+ 0. General  (4 files)
+     forum      Avisos
+     resource   Programa de la materia
+        167.8 KB  Programa - Taller de Desarrollo de Software.pdf
+     folder     Material Bibliográfico Digital
+        840.6 KB  _Carátula licencia.pdf
+         28.0 MB  Bass, L. Software Architecture in Practice.pdf
+     lti        Clases Grabadas
+```
+
+Activities without downloadable files — forums, quizzes, assignments, external links — are
+listed without file entries. Filenames printed here can be passed verbatim to
+`course download --file`.
+
+### `moodle course download`
+
+Downloads a course's files into `./<shortname>/`, mirroring its section structure. Moodle
+folders become nested directories.
+
+| Option | Description |
+| --- | --- |
+| `--output`, `-o PATH` | Destination directory. Default `./<shortname>/`. |
+| `--section N` | Only this section number. Repeatable. |
+| `--type TYPE` | Only these module types, e.g. `resource`, `folder`. Repeatable. |
+| `--file NAME` | Exact filename as printed by `course contents`. Repeatable. |
+| `--match GLOB` | Case-insensitive glob on the filename, e.g. `'*.pdf'`. Repeatable. |
+| `--dry-run` | List what would be downloaded and write nothing. |
+| `--overwrite` | Re-download files that already exist. |
+
+`--section` and `--type` narrow by structure, `--file` and `--match` by filename. All four
+compose by intersection.
 
 ```bash
-# Courses
-moodle courses list
-moodle courses list --view starred --sort last-accessed
-moodle courses list --json
-
-# A single course, by id or shortname prefix
-moodle course contents IOS460
-moodle course participants IOS460 --role student
-
-# Downloads land in ./<shortname>/, mirroring the course's sections
-moodle course download IOS460 --dry-run
-moodle course download IOS460
-moodle course download IOS460 --section 0 --type resource --output ~/apuntes
-
-# Pick individual files: --file is an exact name, --match a glob. Both repeatable.
-moodle course download H202 --file "Kershaw, I. Descenso a los infiernos. Cap. 8.pdf"
-moodle course download H202 --match "Cronología*" --match "Cuadro*"
+moodle course download IOS460                              # everything
+moodle course download IOS460 --dry-run                    # preview first
+moodle course download IOS460 --section 0 --type resource  # one section, files only
+moodle course download H202 --file "Kershaw cap. 7.pdf"    # one specific file
+moodle course download H202 --match '*.pdf' -o ~/apuntes   # only PDFs, elsewhere
 ```
 
-`--section` and `--type` narrow by structure, `--file` and `--match` by filename; they
-compose by intersection. A `--file` name that matches nothing is an error, not a silent
-zero-file download, and the message distinguishes a typo from a name excluded by another
-filter. Note that filenames are not unique in a course — a duplicated activity yields two
-entries with the same name, which the planner collapses when they are byte-identical.
+Re-running is safe and cheap: a file already on disk at the expected size is skipped, so an
+interrupted download resumes by re-running the same command. Every transfer is verified
+against the size the API declares; a truncated or bogus response is reported as a failure
+and nothing partial is left behind.
 
-Every read command takes `--json`.
+A `--file` name that matches nothing is an error, not a silent zero-file download, and the
+message distinguishes a typo from a name excluded by `--section` or `--type`.
 
-### Participant emails
+### `moodle course participants`
 
-The API returns an email address for every enrolled person. `course participants` withholds
-them unless you pass `--emails`, in both the table and the JSON output.
+Lists the people enrolled in a course.
+
+| Option | Description |
+| --- | --- |
+| `--role SHORTNAME` | Filter by role, e.g. `student`, `editingteacher`. |
+| `--emails` | Include email addresses. Hidden by default. |
+| `--json` | JSON output. |
+
+Email addresses are withheld unless you ask for them, in the table and in the JSON alike.
+
+```console
+$ moodle course participants IOS460 --role student
+             20 participants in IOS460 - 123246
+┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ name                 ┃ roles    ┃ last access ┃
+┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ Grace Hopper         │ student  │  2026-07-26 │
+└──────────────────────┴──────────┴─────────────┘
+```
 
 ## MCP server
 
-Exposes `list_courses`, `get_course_contents`, `download_course_files` and
-`list_participants` over stdio. Register it with:
+Exposes the same functionality to an agent over stdio.
 
 ```bash
 claude mcp add moodle -- uv run --project /path/to/moodle-cli moodle-mcp
 ```
 
-`download_course_files` writes to disk and returns a manifest of paths — never file contents,
-which would flood the agent's context. Emails are opt-in there too.
+| Tool | Parameters |
+| --- | --- |
+| `list_courses` | `view` (enum, default `all`), `sort` (enum, default `name`) |
+| `get_course_contents` | `course` |
+| `download_course_files` | `course`, `output_dir`, `sections[]`, `module_types[]`, `files[]`, `match[]`, `dry_run` |
+| `list_participants` | `course`, `role`, `include_emails` (default `false`) |
 
-## Campus quirks this handles
+`download_course_files` writes to disk and returns a manifest of paths, sizes and per-file
+status. It never returns file contents: a single course can hold hundreds of megabytes, and
+the agent can read whatever it needs from disk afterwards. Emails are opt-in here too.
 
-**The API fails with HTTP 200.** A bad login, a rejected web-service call, and an
-unauthenticated file download all return status 200 with an error payload in the body. Any
-client that trusts `raise_for_status()` will write a 141-byte JSON error to disk named
-`Programa.pdf` and report success. Every response is checked for an error body, and every
-download is validated against the `filesize` and content type the API declares.
+## Configuration
 
-**Course end dates are never set.** All courses report `enddate = 0`, so Moodle classifies
-every course you have ever taken as "in progress". `--view in-progress` returns everything
-and `--view past` / `--view future` return nothing. The flags exist because they are valid
-Moodle, but only `all`, `starred` and `hidden` discriminate here — use the `year` column to
-judge recency.
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `MOODLE_URL` | yes | Campus base URL, e.g. `https://campus.example.edu`. |
+| `MOODLE_TOKEN` | no | Use this token directly and skip the keyring. |
+| `MOODLE_USER` | no | Username, so `auth login` does not prompt for it. |
+| `MOODLE_PASS` | no | Password, for minting a token unattended. |
 
-**Bibliography files are flagged `isexternalfile`.** They live in an external repository but
-are still served through `pluginfile.php`, so they are downloaded like any other file.
-Filtering them out silently loses most of a course's reading material.
+These can be set in the environment or in a `.env` file at the project root; see
+[`.env.example`](.env.example). Token resolution order is `MOODLE_TOKEN`, then the keyring,
+then minting a new one from `MOODLE_USER` and `MOODLE_PASS`.
 
-## Develop
+Storing `MOODLE_PASS` is only needed for unattended use. After `auth login` the token lives
+in the keyring and the password can be removed.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `1` | API error, authentication failure, unknown course, unknown `--file` name, or one or more downloads failed. |
+| `2` | Invalid command line arguments. |
+
+Failures print to stderr, so `--json` output stays parseable.
+
+## Things worth knowing
+
+**Time-based course filters depend on your campus.** `--view in-progress`, `past` and
+`future` are computed by Moodle from course start and end dates. Campuses that never set an
+end date classify every course you have ever taken as "in progress", which makes
+`in-progress` return everything and `past`/`future` return nothing. If that is your case,
+use `--view all` or `--view starred` and read the `year` column.
+
+**Filenames are not unique within a course.** Duplicating an activity produces two entries
+with the same filename. Byte-identical copies are downloaded once; files that share a name
+but differ in size are both kept, with the module id appended to the second.
+
+**Downloads are verified, not assumed.** Moodle answers some failed requests with HTTP 200
+and a JSON error body. Written to disk unchecked, that becomes a small JSON file wearing a
+`.pdf` name. Every download is checked against its declared size and content type.
+
+## Development
 
 ```bash
 uv run pytest           # unit tests, no network
-uv run pytest --live    # smoke tests against the real campus
+uv run pytest --live    # integration tests against a real campus
 uv run ruff check .
 uv run mypy
 ```
 
-Unit-test fixtures are synthetic but shape-accurate: they reproduce the campus's quirks
-(null `filepath`, doubled `.pdf.pdf` extensions, external-file flags) without committing real
-classmates' names or addresses. The `--live` suite is what catches the campus changing its
-API underneath the fixtures.
-
-## Not implemented
-
-Recorded lectures and their transcripts live in Panopto, not Moodle — the "Clases Grabadas"
-activity is an LTI launch into `udesa.hosted.panopto.com`. That needs a separate auth flow
-and is not covered here. Assignments and grades are also out of scope.
+Unit-test fixtures are synthetic but shape-accurate, reproducing the quirks real campuses
+return without committing anyone's personal data. The `--live` suite needs credentials in
+the environment and is what catches a campus changing its API underneath the fixtures.
