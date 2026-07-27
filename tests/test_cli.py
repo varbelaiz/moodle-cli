@@ -194,6 +194,85 @@ def test_download_reports_failure_and_exits_nonzero(
 
 
 @respx.mock
+def test_download_selects_an_exact_filename(
+    courses_payload: dict[str, Any],
+    contents_payload: list[dict[str, Any]],
+    tmp_cwd: Path,
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(
+        app, ["course", "download", "IOS460", "--file", "Cap 1.pdf", "--dry-run"]
+    )
+
+    # Asserted on the count and size rather than the path: the dry-run table wraps long
+    # destinations, so a filename can be split across lines.
+    assert result.exit_code == 0
+    assert "1 file," in result.stdout
+    assert "2.0 KB" in result.stdout  # the size only "Cap 1.pdf" has
+
+
+@respx.mock
+def test_download_fails_loudly_on_an_unknown_filename(
+    courses_payload: dict[str, Any],
+    contents_payload: list[dict[str, Any]],
+    tmp_cwd: Path,
+) -> None:
+    """A typo must be an error, not a silent zero-file success."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(app, ["course", "download", "IOS460", "--file", "Cap 9.pdf"])
+
+    assert result.exit_code == 1
+    assert "no such file in this course" in result.output
+    assert list(tmp_cwd.iterdir()) == []
+
+
+@respx.mock
+def test_download_distinguishes_a_filtered_out_name_from_a_typo(
+    courses_payload: dict[str, Any],
+    contents_payload: list[dict[str, Any]],
+    tmp_cwd: Path,
+) -> None:
+    """The two failures need different fixes, so they must not read the same."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(
+        app, ["course", "download", "IOS460", "--file", "Cap 1.pdf", "--section", "1"]
+    )
+
+    assert result.exit_code == 1
+    assert "excluded by --section/--type" in result.output
+
+
+@respx.mock
+def test_download_selects_by_glob(
+    courses_payload: dict[str, Any],
+    contents_payload: list[dict[str, Any]],
+    tmp_cwd: Path,
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(app, ["course", "download", "IOS460", "--match", "_Car*", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "1 file," in result.stdout
+    assert "Carátula" in result.stdout
+
+
+@respx.mock
 def test_api_error_is_reported_cleanly(courses_payload: dict[str, Any]) -> None:
     respx.post(REST_URL).mock(
         return_value=httpx.Response(

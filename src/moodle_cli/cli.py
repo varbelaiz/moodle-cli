@@ -24,11 +24,12 @@ from moodle_cli.downloads import (
     DownloadStatus,
     PlannedDownload,
     download_file,
+    iter_course_files,
     plan_downloads,
     sanitize,
 )
 from moodle_cli.errors import MoodleError
-from moodle_cli.models import Participant
+from moodle_cli.models import Participant, Section
 
 console = Console()
 err_console = Console(stderr=True)
@@ -282,6 +283,18 @@ def course_download(
         list[str] | None,
         typer.Option("--type", help="Only these module types, e.g. resource. Repeatable."),
     ] = None,
+    names: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--file",
+            help="Exact filename, as shown by `course contents`. Repeatable. "
+            "Fails if a name matches nothing.",
+        ),
+    ] = None,
+    patterns: Annotated[
+        list[str] | None,
+        typer.Option("--match", help="Glob on the filename, e.g. '*.pdf'. Repeatable."),
+    ] = None,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="List what would be downloaded, write nothing.")
     ] = False,
@@ -289,7 +302,12 @@ def course_download(
         bool, typer.Option("--overwrite", help="Re-download files that already exist.")
     ] = False,
 ) -> None:
-    """Download a course's files, mirroring its section structure."""
+    """Download a course's files, mirroring its section structure.
+
+    Selectors compose: --section and --type narrow by structure, --file and --match by
+    filename. A --file name that matches nothing is an error rather than a silent
+    zero-file download, so a typo fails loudly.
+    """
     config = load_config()
     token = resolve_token(config)
 
@@ -303,7 +321,12 @@ def course_download(
         root,
         only_sections=set(sections) if sections else None,
         only_modtypes=set(types) if types else None,
+        only_names=set(names) if names else None,
+        only_patterns=patterns or None,
     )
+
+    if names:
+        _reject_unknown_names(names, planned, contents)
 
     if not planned:
         console.print("[yellow]No matching files.[/yellow]")
@@ -347,6 +370,28 @@ def course_download(
     console.print(summary)
     if failed:
         raise typer.Exit(1)
+
+
+def _reject_unknown_names(
+    requested: list[str], planned: list[PlannedDownload], contents: list[Section]
+) -> None:
+    """Fail on a --file name that selected nothing.
+
+    Distinguishes a typo from a name excluded by another filter, because the two need
+    different fixes and the symptom is identical.
+    """
+    selected = {p.file.filename for p in planned}
+    missing = [name for name in requested if name not in selected]
+    if not missing:
+        return
+
+    in_course = {f.filename for _, _, f in iter_course_files(contents)}
+    for name in missing:
+        reason = (
+            "excluded by --section/--type" if name in in_course else "no such file in this course"
+        )
+        err_console.print(f"[red]Error:[/red] {escape(name)}: {reason}")
+    raise typer.Exit(1)
 
 
 def _print_plan(planned: list[PlannedDownload], root: Path) -> None:

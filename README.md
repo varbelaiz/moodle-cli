@@ -50,7 +50,17 @@ moodle course participants IOS460 --role student
 moodle course download IOS460 --dry-run
 moodle course download IOS460
 moodle course download IOS460 --section 0 --type resource --output ~/apuntes
+
+# Pick individual files: --file is an exact name, --match a glob. Both repeatable.
+moodle course download H202 --file "Kershaw, I. Descenso a los infiernos. Cap. 8.pdf"
+moodle course download H202 --match "Cronología*" --match "Cuadro*"
 ```
+
+`--section` and `--type` narrow by structure, `--file` and `--match` by filename; they
+compose by intersection. A `--file` name that matches nothing is an error, not a silent
+zero-file download, and the message distinguishes a typo from a name excluded by another
+filter. Note that filenames are not unique in a course — a duplicated activity yields two
+entries with the same name, which the planner collapses when they are byte-identical.
 
 Every read command takes `--json`.
 

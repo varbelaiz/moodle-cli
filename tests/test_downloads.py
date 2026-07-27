@@ -124,6 +124,41 @@ def test_plan_downloads_renames_rather_than_overwrites_differing_files(
     assert len({p.destination for p in planned}) == len(planned)
 
 
+def test_plan_downloads_selects_an_exact_filename(sections: list[Section]) -> None:
+    planned = plan_downloads(sections, Path("root"), only_names={"Cap 1.pdf"})
+    assert [p.file.filename for p in planned] == ["Cap 1.pdf"]
+
+
+def test_exact_name_does_not_match_partially(sections: list[Section]) -> None:
+    """The point of --file is determinism: a substring must not select the file."""
+    assert plan_downloads(sections, Path("root"), only_names={"Cap 1"}) == []
+
+
+def test_plan_downloads_selects_by_glob(sections: list[Section]) -> None:
+    planned = plan_downloads(sections, Path("root"), only_patterns=["*.pdf"])
+    assert {p.file.filename for p in planned} == {
+        "Programa  - Taller.pdf.pdf",
+        "_Carátula licencia.pdf",
+        "Cap 1.pdf",
+    }
+
+
+def test_glob_is_case_insensitive(sections: list[Section]) -> None:
+    assert len(plan_downloads(sections, Path("root"), only_patterns=["*.PDF"])) == 3
+
+
+def test_name_and_glob_selectors_union(sections: list[Section]) -> None:
+    planned = plan_downloads(
+        sections, Path("root"), only_names={"Cap 1.pdf"}, only_patterns=["_Car*"]
+    )
+    assert {p.file.filename for p in planned} == {"Cap 1.pdf", "_Carátula licencia.pdf"}
+
+
+def test_name_selector_intersects_with_structural_filters(sections: list[Section]) -> None:
+    """Selectors compose by intersection: a real file in the wrong section drops out."""
+    assert plan_downloads(sections, Path("root"), only_sections={1}, only_names={"Cap 1.pdf"}) == []
+
+
 def test_plan_downloads_filters_by_section(sections: list[Section]) -> None:
     assert plan_downloads(sections, Path("root"), only_sections={1}) == []
 

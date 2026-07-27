@@ -11,9 +11,10 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
+from fnmatch import fnmatch
 from pathlib import Path
 
 import httpx
@@ -75,18 +76,42 @@ def iter_course_files(sections: list[Section]) -> Iterator[tuple[Section, Module
                 yield section, module, file
 
 
+def matches_selection(
+    filename: str,
+    names: Collection[str] | None,
+    patterns: Collection[str] | None,
+) -> bool:
+    """Whether a file is picked by the name/pattern selectors.
+
+    Names match exactly, so a value copied out of `course contents` selects precisely that
+    file. Patterns are case-insensitive globs. With both given the selection is their union;
+    with neither, everything passes.
+    """
+    if names is None and patterns is None:
+        return True
+    if names and filename in names:
+        return True
+    return bool(patterns) and any(
+        fnmatch(filename.casefold(), p.casefold()) for p in patterns or ()
+    )
+
+
 def plan_downloads(
     sections: list[Section],
     root: Path,
     *,
     only_sections: set[int] | None = None,
     only_modtypes: set[str] | None = None,
+    only_names: Collection[str] | None = None,
+    only_patterns: Collection[str] | None = None,
 ) -> list[PlannedDownload]:
     """Map course contents onto destination paths.
 
     Sections become directories. A Moodle ``folder`` module becomes a nested directory,
     which both matches how it reads on the course page and keeps identically named files
     from different modules out of each other's way.
+
+    Section and module-type filters compose with the name selectors by intersection.
     """
     planned: list[PlannedDownload] = []
     claimed: dict[Path, int] = {}
@@ -95,6 +120,8 @@ def plan_downloads(
         if only_sections is not None and section.section not in only_sections:
             continue
         if only_modtypes is not None and module.modname not in only_modtypes:
+            continue
+        if not matches_selection(file.filename, only_names, only_patterns):
             continue
 
         parts = [sanitize(f"{section.section:02d} - {section.name}", fallback="section")]
