@@ -144,6 +144,24 @@ def test_get_course_contents_keeps_only_real_files(
 
 
 @respx.mock
+def test_get_course_contents_surfaces_url_module_targets_as_links(
+    client: MoodleClient, contents_payload: list[dict[str, Any]]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=contents_payload))
+
+    sections = client.get_course_contents(101)
+    links = [link for s in sections for m in s.modules for link in m.links]
+
+    assert len(links) == 1
+    assert links[0].filename == "Slack de la Materia"
+    assert links[0].fileurl == "https://slack.example.com/join"
+    # A url module's target never shows up in `files`: there is nothing to download.
+    assert all(
+        link not in [f for s in sections for m in s.modules for f in m.files] for link in links
+    )
+
+
+@respx.mock
 def test_get_participants_pages_until_short_page(client: MoodleClient) -> None:
     from moodle_cli.client import _PARTICIPANT_PAGE_SIZE
 
@@ -160,6 +178,194 @@ def test_get_participants_pages_until_short_page(client: MoodleClient) -> None:
 
     assert len(people) == _PARTICIPANT_PAGE_SIZE + 1
     assert posted_params(route.calls[1].request)["options[0][value]"] == str(_PARTICIPANT_PAGE_SIZE)
+
+
+# -- announcements -----------------------------------------------------------------
+
+
+@respx.mock
+def test_get_announcements_only_reads_news_forums(
+    client: MoodleClient,
+    forums_payload: list[dict[str, Any]],
+    discussions_payload: dict[str, Any],
+) -> None:
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=forums_payload),
+            httpx.Response(200, json=discussions_payload),
+        ]
+    )
+
+    announcements = client.get_announcements(course_id=101)
+
+    # Two calls total: the general-discussion forum (502) is never queried.
+    assert len(route.calls) == 2
+    assert posted_params(route.calls[1].request)["forumid"] == "501"
+
+    assert [a.id for a in announcements] == [9001, 9000]  # newest first
+    assert all(a.courseid == 101 for a in announcements)
+    assert "<strong>" not in announcements[0].message_text
+    assert "S004" in announcements[0].message_text
+
+
+@respx.mock
+def test_get_announcements_returns_empty_without_a_news_forum(client: MoodleClient) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=[]))
+    assert client.get_announcements(course_id=101) == []
+
+
+# -- assignments -------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_assignments_flattens_courses(
+    client: MoodleClient, assignments_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=assignments_payload))
+
+    assignments = client.get_assignments()
+
+    assert len(assignments) == 1
+    assert assignments[0].name == "Actividad semana 1"
+    assert assignments[0].course == 101
+
+
+@respx.mock
+def test_get_assignment_status_extracts_submission_and_grade(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    status = client.get_assignment_status(40393)
+
+    assert status.submitted is True
+    assert status.graded is True
+    # &nbsp; arrives HTML-escaped and is decoded, not left literal.
+    assert status.gradefordisplay == "90.00\xa0/\xa0100.00"
+    assert status.submitted_files == ["Entrega - Semana 1.pdf"]
+
+
+# -- quizzes ---------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_quizzes_defaults_to_every_enrolled_course(
+    client: MoodleClient, courses_payload: dict[str, Any], quizzes_payload: dict[str, Any]
+) -> None:
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=courses_payload),
+            httpx.Response(200, json=quizzes_payload),
+        ]
+    )
+
+    quizzes = client.get_quizzes()
+
+    assert len(quizzes) == 1
+    assert quizzes[0].name == "Actividad semana 2"
+    assert quizzes[0].course == 101
+    params = posted_params(route.calls[1].request)
+    assert {params[k] for k in params if k.startswith("courseids[")} == {"101", "102", "103"}
+
+
+@respx.mock
+def test_get_quiz_status_combines_attempts_and_best_grade(
+    client: MoodleClient,
+    quiz_attempts_payload: dict[str, Any],
+    quiz_best_grade_payload: dict[str, Any],
+) -> None:
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=quiz_attempts_payload),
+            httpx.Response(200, json=quiz_best_grade_payload),
+        ]
+    )
+
+    status = client.get_quiz_status(42628)
+
+    assert status.attempt_count == 1
+    assert status.last_state == "finished"
+    assert status.has_grade is True
+    assert status.grade == 6.925
+    assert status.grade_to_pass == 4
+
+
+@respx.mock
+def test_get_quiz_status_handles_no_attempts_yet(client: MoodleClient) -> None:
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"attempts": [], "warnings": []}),
+            httpx.Response(200, json={"hasgrade": False, "gradetopass": 60, "warnings": []}),
+        ]
+    )
+
+    status = client.get_quiz_status(42628)
+
+    assert status.attempt_count == 0
+    assert status.last_state is None
+    assert status.has_grade is False
+
+
+# -- grades ----------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_grade_overview_uses_the_tokens_own_user_id(
+    client: MoodleClient, grades_overview_payload: dict[str, Any]
+) -> None:
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(200, json=grades_overview_payload),
+        ]
+    )
+
+    grades = client.get_grade_overview()
+
+    assert posted_params(route.calls[1].request)["userid"] == "63643"
+    assert [g.courseid for g in grades] == [101, 102]
+    assert grades[0].grade == "85.00"
+
+
+@respx.mock
+def test_get_grade_items_returns_the_first_users_items(
+    client: MoodleClient, grade_items_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(200, json=grade_items_payload),
+        ]
+    )
+
+    items = client.get_grade_items(101)
+
+    assert [i.itemname for i in items] == ["TP1", "Curso total"]
+    # The course-total row has no backing activity: itemmodule arrives null, not "".
+    assert items[1].itemmodule is None
+    assert items[0].gradeformatted == "10.00"
+
+
+@respx.mock
+def test_get_grade_items_surfaces_missing_gradebook_permission(client: MoodleClient) -> None:
+    """A per-course setting, not a token-wide block: get_grade_overview is unaffected."""
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(
+                200,
+                json={
+                    "exception": "moodle_exception",
+                    "errorcode": "nopermissiontoviewgrades",
+                    "message": "No se pueden ver las calificaciones.",
+                },
+            ),
+        ]
+    )
+
+    with pytest.raises(MoodleAPIError) as excinfo:
+        client.get_grade_items(101)
+    assert excinfo.value.errorcode == "nopermissiontoviewgrades"
 
 
 # -- course resolution -----------------------------------------------------------

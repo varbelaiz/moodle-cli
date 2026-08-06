@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import html
 from types import TracebackType
 from typing import Any
 
 import httpx
 
 from moodle_cli.errors import MoodleAPIError, MoodleError
-from moodle_cli.models import Course, Participant, Section, SiteInfo
+from moodle_cli.models import (
+    Announcement,
+    Assignment,
+    AssignmentStatus,
+    Course,
+    CourseGrade,
+    GradeItem,
+    Participant,
+    Quiz,
+    QuizStatus,
+    Section,
+    SiteInfo,
+)
 
 REST_PATH = "/webservice/rest/server.php"
 
@@ -158,6 +171,126 @@ class MoodleClient:
             if len(page) < _PARTICIPANT_PAGE_SIZE:
                 return participants
             offset += _PARTICIPANT_PAGE_SIZE
+
+    def get_announcements(self, course_id: int | None = None) -> list[Announcement]:
+        """Posts from each course's news forum, newest first.
+
+        Only a forum with ``type == "news"`` carries announcements; a course's regular
+        discussion forums are skipped. Uses ``mod_forum_get_forum_discussions``, not the
+        similarly-named ``mod_forum_get_discussions``: the latter is not exposed by this
+        campus's token.
+        """
+        course_ids = (
+            [course_id] if course_id is not None else [c.id for c in self.list_courses(view="all")]
+        )
+        if not course_ids:
+            return []
+
+        forums = self._call("mod_forum_get_forums_by_courses", courseids=course_ids)
+        news_forums = [f for f in forums if f.get("type") == "news"]
+
+        announcements: list[Announcement] = []
+        for forum in news_forums:
+            body = self._call("mod_forum_get_forum_discussions", forumid=forum["id"])
+            for discussion in body.get("discussions", []):
+                announcements.append(
+                    Announcement.model_validate({**discussion, "courseid": forum["course"]})
+                )
+
+        announcements.sort(key=lambda a: a.created, reverse=True)
+        return announcements
+
+    def get_assignments(self, course_ids: list[int] | None = None) -> list[Assignment]:
+        """Assignments across courses; every enrolled course if ``course_ids`` is omitted."""
+        params: dict[str, Any] = {"courseids": course_ids} if course_ids else {}
+        body = self._call("mod_assign_get_assignments", **params)
+        return [
+            Assignment.model_validate(a)
+            for course in body.get("courses", [])
+            for a in course.get("assignments", [])
+        ]
+
+    def get_assignment_status(self, assignment_id: int) -> AssignmentStatus:
+        """Submission and grading status for one assignment.
+
+        ``assignment_id`` is the assignment's own ``id`` (from :meth:`get_assignments`),
+        not the course-module id: passing a cmid raises ``invalidrecordunknown``.
+        """
+        body = self._call("mod_assign_get_submission_status", assignid=assignment_id)
+        lastattempt = body.get("lastattempt") or {}
+        submission = lastattempt.get("submission") or {}
+        feedback = body.get("feedback") or {}
+        grade = feedback.get("grade") or {}
+
+        files = [
+            file["filename"]
+            for plugin in submission.get("plugins", [])
+            if plugin.get("type") == "file"
+            for area in plugin.get("fileareas", [])
+            for file in area.get("files", [])
+        ]
+
+        return AssignmentStatus(
+            status=submission.get("status"),
+            gradingstatus=lastattempt.get("gradingstatus", ""),
+            grade=grade.get("grade"),
+            gradefordisplay=html.unescape(feedback.get("gradefordisplay", "")),
+            extensionduedate=lastattempt.get("extensionduedate", 0),
+            submitted_files=files,
+        )
+
+    def get_quizzes(self, course_ids: list[int] | None = None) -> list[Quiz]:
+        """Quizzes across courses; every enrolled course if ``course_ids`` is omitted."""
+        ids = course_ids if course_ids else [c.id for c in self.list_courses(view="all")]
+        if not ids:
+            return []
+        body = self._call("mod_quiz_get_quizzes_by_courses", courseids=ids)
+        return [Quiz.model_validate(q) for q in body.get("quizzes", [])]
+
+    def get_quiz_status(self, quiz_id: int) -> QuizStatus:
+        """Attempt history and best grade for one quiz.
+
+        Two calls, because neither alone answers "did I take this and how did it go":
+        ``mod_quiz_get_user_attempts`` carries no grade, ``mod_quiz_get_user_best_grade``
+        carries no attempt history.
+        """
+        attempts_body = self._call(
+            "mod_quiz_get_user_attempts", quizid=quiz_id, status="all", includepreviews=0
+        )
+        attempts = attempts_body.get("attempts", [])
+        grade_body = self._call("mod_quiz_get_user_best_grade", quizid=quiz_id)
+
+        return QuizStatus(
+            attempt_count=len(attempts),
+            last_state=attempts[-1]["state"] if attempts else None,
+            has_grade=grade_body.get("hasgrade", False),
+            grade=grade_body.get("grade"),
+            grade_to_pass=grade_body.get("gradetopass"),
+        )
+
+    def get_grade_overview(self) -> list[CourseGrade]:
+        """Course-level grade summary across every enrolled course.
+
+        Unlike :meth:`get_grade_items`, this works regardless of whether an instructor
+        has enabled the gradebook for students in a given course.
+        """
+        info = self.get_site_info()
+        body = self._call("gradereport_overview_get_course_grades", userid=info.userid)
+        return [CourseGrade.model_validate(g) for g in body.get("grades", [])]
+
+    def get_grade_items(self, course_id: int) -> list[GradeItem]:
+        """Per-item grade breakdown for one course.
+
+        Raises :class:`MoodleAPIError` with ``errorcode == "nopermissiontoviewgrades"``
+        when the instructor has not enabled the gradebook for students in this course —
+        this is a per-course setting, not a blanket token restriction.
+        """
+        info = self.get_site_info()
+        body = self._call(
+            "gradereport_user_get_grade_items", courseid=course_id, userid=info.userid
+        )
+        usergrades = body.get("usergrades") or [{}]
+        return [GradeItem.model_validate(item) for item in usergrades[0].get("gradeitems", [])]
 
     # -- convenience -------------------------------------------------------------
 

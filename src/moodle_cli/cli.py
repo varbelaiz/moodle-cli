@@ -35,7 +35,10 @@ console = Console()
 err_console = Console(stderr=True)
 
 app = typer.Typer(
-    help="Access a Moodle campus: courses, contents, downloads and participants.",
+    help=(
+        "Access a Moodle campus: courses, contents, downloads, participants, "
+        "announcements, assignments, quizzes and grades."
+    ),
     no_args_is_help=True,
     add_completion=False,
 )
@@ -223,6 +226,35 @@ def courses_list(
     console.print(table)
 
 
+@courses_app.command("grades")
+@handle_errors
+def courses_grades(as_json: JsonOpt = False) -> None:
+    """Show a grade summary across every enrolled course.
+
+    Works even for a course whose gradebook is not open to students. For a per-item
+    breakdown of one course, use `course grades` instead.
+    """
+    with _client() as client:
+        course_names = {c.id: c.shortname for c in client.list_courses(view="all")}
+        overview = client.get_grade_overview()
+
+    if as_json:
+        _emit_json(
+            [
+                {"course": course_names.get(g.courseid, str(g.courseid)), "grade": g.grade}
+                for g in overview
+            ]
+        )
+        return
+
+    table = Table(title=f"Grade summary ({len(overview)} courses)")
+    table.add_column("course")
+    table.add_column("grade", justify="right")
+    for g in overview:
+        table.add_row(course_names.get(g.courseid, str(g.courseid)), g.grade or "-")
+    console.print(table)
+
+
 def _short_name(fullname: str, shortname: str) -> str:
     """Drop the course code the fullname repeats from the shortname.
 
@@ -241,7 +273,7 @@ def _short_name(fullname: str, shortname: str) -> str:
 @course_app.command("contents")
 @handle_errors
 def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
-    """Show a course's sections, activities and downloadable files."""
+    """Show a course's sections, activities, downloadable files and external links."""
     with _client() as client:
         resolved = client.resolve_course(course)
         sections = client.get_course_contents(resolved.id)
@@ -253,7 +285,9 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
     console.print(f"[bold]{escape(resolved.shortname)}[/bold] — {escape(resolved.fullname)}\n")
     for section in sections:
         files = sum(len(m.files) for m in section.modules)
-        suffix = f"  [dim]({files} {_plural(files, 'file')})[/dim]" if files else ""
+        links = sum(len(m.links) for m in section.modules)
+        counts = [c for c in [_count(files, "file"), _count(links, "link")] if c]
+        suffix = f"  [dim]({', '.join(counts)})[/dim]" if counts else ""
         console.print(
             f"[bold cyan]{section.section:>2}. {escape(section.name)}[/bold cyan]{suffix}"
         )
@@ -264,7 +298,13 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
                 # Size leads so a long filename wrapping cannot orphan it on its own line.
                 size = _human_size(file.filesize).rjust(9)
                 console.print(f"       [dim]{size}[/dim]  {escape(file.filename)}")
+            for link in module.links:
+                console.print(f"       [dim]{'link':>9}[/dim]  {escape(link.fileurl or '')}")
         console.print()
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {_plural(n, noun)}" if n else ""
 
 
 @course_app.command("download")
@@ -457,6 +497,163 @@ def _participant_payload(person: Participant, emails: bool) -> dict[str, Any]:
     if not emails:
         payload.pop("email", None)
     return payload
+
+
+@course_app.command("announcements")
+@handle_errors
+def course_announcements(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """List announcements from a course's news forum, newest first.
+
+    Only a forum Moodle marks as "news" carries announcements; a course without one
+    prints nothing.
+    """
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        announcements = client.get_announcements(resolved.id)
+
+    if as_json:
+        _emit_json([a.model_dump(mode="json") for a in announcements])
+        return
+
+    if not announcements:
+        console.print("[yellow]No announcements.[/yellow]")
+        return
+
+    for a in announcements:
+        pin = " [yellow](pinned)[/yellow]" if a.pinned else ""
+        console.print(f"[bold]{escape(a.subject)}[/bold]{pin}")
+        console.print(f"  [dim]{_format_epoch(a.created)} — {escape(a.userfullname)}[/dim]")
+        console.print(f"  {escape(a.message_text)}")
+        console.print()
+
+
+@course_app.command("assignments")
+@handle_errors
+def course_assignments(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """List a course's assignments and due dates."""
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        assignments = client.get_assignments([resolved.id])
+
+    if as_json:
+        _emit_json([a.model_dump(mode="json") for a in assignments])
+        return
+
+    table = Table(title=f"{len(assignments)} assignments in {resolved.shortname}")
+    table.add_column("id", justify="right", style="dim")
+    table.add_column("name")
+    table.add_column("due", justify="right", style="dim")
+    table.add_column("grade", justify="right", style="dim")
+    for a in assignments:
+        table.add_row(str(a.id), escape(a.name), _format_epoch(a.duedate), str(a.grade))
+    console.print(table)
+
+
+AssignmentIdArg = Annotated[
+    int, typer.Argument(help="Assignment id, as shown by `course assignments`.")
+]
+
+
+@course_app.command("assignment-status")
+@handle_errors
+def course_assignment_status(assignment_id: AssignmentIdArg, as_json: JsonOpt = False) -> None:
+    """Show submission and grading status for one assignment.
+
+    `assignment_id` is the id from `course assignments` — not a course-module id, which
+    this call rejects.
+    """
+    with _client() as client:
+        status = client.get_assignment_status(assignment_id)
+
+    if as_json:
+        _emit_json(status.model_dump(mode="json"))
+        return
+
+    console.print(f"submitted: {'yes' if status.submitted else 'no'} ({status.status or '-'})")
+    console.print(f"graded: {'yes' if status.graded else 'no'}")
+    if status.gradefordisplay:
+        console.print(f"grade: {escape(status.gradefordisplay)}")
+    if status.submitted_files:
+        console.print("files:")
+        for name in status.submitted_files:
+            console.print(f"  {escape(name)}")
+    if status.extension_due_at:
+        console.print(f"extension until: {status.extension_due_at.date().isoformat()}")
+
+
+@course_app.command("quizzes")
+@handle_errors
+def course_quizzes(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """List a course's quizzes and their open/close windows."""
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        quizzes = client.get_quizzes([resolved.id])
+
+    if as_json:
+        _emit_json([q.model_dump(mode="json") for q in quizzes])
+        return
+
+    table = Table(title=f"{len(quizzes)} quizzes in {resolved.shortname}")
+    table.add_column("id", justify="right", style="dim")
+    table.add_column("name")
+    table.add_column("closes", justify="right", style="dim")
+    table.add_column("attempts", justify="right", style="dim")
+    for q in quizzes:
+        attempts = str(q.attempts) if q.attempts else "unlimited"
+        table.add_row(str(q.id), escape(q.name), _format_epoch(q.timeclose), attempts)
+    console.print(table)
+
+
+QuizIdArg = Annotated[int, typer.Argument(help="Quiz id, as shown by `course quizzes`.")]
+
+
+@course_app.command("quiz-status")
+@handle_errors
+def course_quiz_status(quiz_id: QuizIdArg, as_json: JsonOpt = False) -> None:
+    """Show attempt count and best grade for one quiz.
+
+    `quiz_id` is the id from `course quizzes`.
+    """
+    with _client() as client:
+        status = client.get_quiz_status(quiz_id)
+
+    if as_json:
+        _emit_json(status.model_dump(mode="json"))
+        return
+
+    console.print(f"attempts used: {status.attempt_count}")
+    if status.last_state:
+        console.print(f"last attempt: {status.last_state}")
+    if status.has_grade:
+        pass_note = f" (pass: {status.grade_to_pass})" if status.grade_to_pass else ""
+        console.print(f"grade: {status.grade}{pass_note}")
+    else:
+        console.print("grade: not graded yet")
+
+
+@course_app.command("grades")
+@handle_errors
+def course_grades(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """Show the per-item grade breakdown for one course: assignments, quizzes, etc.
+
+    Fails if the instructor has not opened the gradebook to students in this course;
+    `courses grades` still works in that case, just without per-item detail.
+    """
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        items = client.get_grade_items(resolved.id)
+
+    if as_json:
+        _emit_json([i.model_dump(mode="json") for i in items])
+        return
+
+    table = Table(title=f"Grades for {resolved.shortname}")
+    table.add_column("item")
+    table.add_column("grade", justify="right")
+    table.add_column("max", justify="right", style="dim")
+    for i in items:
+        table.add_row(escape(i.itemname or "-"), i.gradeformatted or "-", str(i.grademax))
+    console.print(table)
 
 
 def main() -> None:

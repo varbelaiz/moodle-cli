@@ -68,11 +68,13 @@ def list_courses(view: View = "all", sort: Sort = "name") -> list[dict[str, Any]
 
 @mcp.tool()
 def get_course_contents(course: str) -> dict[str, Any]:
-    """Show a course's sections, activities and available files.
+    """Show a course's sections, activities, available files and external links.
 
     `course` accepts a numeric id or a shortname prefix such as "IOS460".
-    File entries list names, sizes and MIME types. To fetch them, call
+    File entries list names, sizes and MIME types; to fetch them, call
     download_course_files, optionally narrowing by section number or module type.
+    Link entries (a "url" module's actual destination, e.g. a recorded-class or
+    external-site link) are informational only — nothing downloads them.
     """
     client, _ = _open_client()
     with client:
@@ -98,6 +100,9 @@ def get_course_contents(course: str) -> dict[str, Any]:
                             {"filename": f.filename, "size": f.filesize, "mimetype": f.mimetype}
                             for f in module.files
                         ],
+                        "links": [
+                            {"name": link.filename, "url": link.fileurl} for link in module.links
+                        ],
                     }
                     for module in section.modules
                 ],
@@ -105,6 +110,49 @@ def get_course_contents(course: str) -> dict[str, Any]:
             for section in sections
         ],
     }
+
+
+@mcp.tool()
+def search_courses(query: str) -> list[dict[str, Any]]:
+    """Search section, activity, file and link names across every enrolled course.
+
+    Case-insensitive substring match on names only — it does not read file contents.
+    One call here replaces one get_course_contents call per course, which matters when
+    the question is "which course has X" rather than "what's in course X".
+    """
+    needle = query.casefold().strip()
+    if not needle:
+        return []
+
+    client, _ = _open_client()
+    matches: list[dict[str, Any]] = []
+    with client:
+        for course in client.list_courses(view="all"):
+            for section in client.get_course_contents(course.id):
+                if needle in section.name.casefold():
+                    matches.append(
+                        {"course": course.shortname, "section": section.name, "match": "section"}
+                    )
+                for module in section.modules:
+                    files = [f.filename for f in module.files if needle in f.filename.casefold()]
+                    links = [
+                        {"name": link.filename, "url": link.fileurl}
+                        for link in module.links
+                        if needle in link.filename.casefold()
+                    ]
+                    if not (needle in module.name.casefold() or files or links):
+                        continue
+                    matches.append(
+                        {
+                            "course": course.shortname,
+                            "section": section.name,
+                            "module": module.name,
+                            "type": module.modname,
+                            "files": files,
+                            "links": links,
+                        }
+                    )
+    return matches
 
 
 @mcp.tool()
@@ -246,6 +294,184 @@ def list_participants(
             entry["email"] = person.email
         people.append(entry)
     return people
+
+
+@mcp.tool()
+def get_course_announcements(course: str | None = None) -> list[dict[str, Any]]:
+    """List announcements from a course's news forum, newest first.
+
+    `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
+    course. Only a forum Moodle marks as "news" carries announcements — a course's regular
+    discussion forums are not included, and a course without a news forum returns nothing.
+    """
+    client, _ = _open_client()
+    with client:
+        if course:
+            resolved = client.resolve_course(course)
+            course_names = {resolved.id: resolved.shortname}
+            announcements = client.get_announcements(resolved.id)
+        else:
+            course_names = {c.id: c.shortname for c in client.list_courses(view="all")}
+            announcements = client.get_announcements()
+
+    return [
+        {
+            "course": course_names.get(a.courseid, str(a.courseid)),
+            "subject": a.subject,
+            "message": a.message_text,
+            "author": a.userfullname,
+            "posted_at": a.posted_at.date().isoformat() if a.posted_at else None,
+            "replies": a.numreplies,
+            "pinned": a.pinned,
+        }
+        for a in announcements
+    ]
+
+
+@mcp.tool()
+def get_assignments(course: str | None = None) -> list[dict[str, Any]]:
+    """List assignments and their due dates.
+
+    `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
+    course. Pass an assignment's `id` from this list to get_assignment_status for
+    submission and grading detail.
+    """
+    client, _ = _open_client()
+    with client:
+        if course:
+            resolved = client.resolve_course(course)
+            course_names = {resolved.id: resolved.shortname}
+            assignments = client.get_assignments([resolved.id])
+        else:
+            course_names = {c.id: c.shortname for c in client.list_courses(view="all")}
+            assignments = client.get_assignments()
+
+    return [
+        {
+            "id": a.id,
+            "course": course_names.get(a.course, str(a.course)),
+            "name": a.name,
+            "due_at": a.due_at.date().isoformat() if a.due_at else None,
+            "max_grade": a.grade,
+        }
+        for a in assignments
+    ]
+
+
+@mcp.tool()
+def get_assignment_status(assignment_id: int) -> dict[str, Any]:
+    """Submission and grading status for one assignment.
+
+    `assignment_id` is the `id` from get_assignments — not a course-module id, which
+    this call rejects.
+    """
+    client, _ = _open_client()
+    with client:
+        status = client.get_assignment_status(assignment_id)
+
+    return {
+        "submitted": status.submitted,
+        "submission_status": status.status,
+        "submitted_files": status.submitted_files,
+        "graded": status.graded,
+        "grade": status.gradefordisplay,
+        "extension_due_at": (
+            status.extension_due_at.date().isoformat() if status.extension_due_at else None
+        ),
+    }
+
+
+@mcp.tool()
+def get_quizzes(course: str | None = None) -> list[dict[str, Any]]:
+    """List quizzes and their open/close windows.
+
+    `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
+    course. Pass a quiz's `id` from this list to get_quiz_status for attempt and grade
+    detail.
+    """
+    client, _ = _open_client()
+    with client:
+        if course:
+            resolved = client.resolve_course(course)
+            course_names = {resolved.id: resolved.shortname}
+            quizzes = client.get_quizzes([resolved.id])
+        else:
+            course_names = {c.id: c.shortname for c in client.list_courses(view="all")}
+            quizzes = client.get_quizzes()
+
+    return [
+        {
+            "id": q.id,
+            "course": course_names.get(q.course, str(q.course)),
+            "name": q.name,
+            "opens_at": q.opens_at.date().isoformat() if q.opens_at else None,
+            "closes_at": q.closes_at.date().isoformat() if q.closes_at else None,
+            "max_attempts": q.attempts,
+            "max_grade": q.grade,
+        }
+        for q in quizzes
+    ]
+
+
+@mcp.tool()
+def get_quiz_status(quiz_id: int) -> dict[str, Any]:
+    """Attempt count and best grade for one quiz.
+
+    `quiz_id` is the `id` from get_quizzes.
+    """
+    client, _ = _open_client()
+    with client:
+        status = client.get_quiz_status(quiz_id)
+
+    return {
+        "attempts_used": status.attempt_count,
+        "last_attempt_state": status.last_state,
+        "graded": status.has_grade,
+        "grade": status.grade,
+        "grade_to_pass": status.grade_to_pass,
+    }
+
+
+@mcp.tool()
+def get_grade_summary() -> list[dict[str, Any]]:
+    """Course-level grade summary across every enrolled course.
+
+    Works even for a course whose gradebook is not open to students. For a per-item
+    breakdown of one course — individual assignments, quizzes, etc. — use get_grades.
+    """
+    client, _ = _open_client()
+    with client:
+        course_names = {c.id: c.shortname for c in client.list_courses(view="all")}
+        overview = client.get_grade_overview()
+
+    return [
+        {"course": course_names.get(g.courseid, str(g.courseid)), "grade": g.grade}
+        for g in overview
+    ]
+
+
+@mcp.tool()
+def get_grades(course: str) -> list[dict[str, Any]]:
+    """Per-item grade breakdown for one course: assignments, quizzes, etc.
+
+    Raises if the instructor has not opened the gradebook to students in this course;
+    get_grade_summary still works in that case, just without the per-item detail.
+    """
+    client, _ = _open_client()
+    with client:
+        resolved = client.resolve_course(course)
+        items = client.get_grade_items(resolved.id)
+
+    return [
+        {
+            "item": item.itemname,
+            "grade": item.gradeformatted,
+            "max": item.grademax,
+            "percentage": item.percentageformatted,
+            "feedback": item.feedback,
+        }
+        for item in items
+    ]
 
 
 def main() -> None:

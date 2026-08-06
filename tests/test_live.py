@@ -18,6 +18,7 @@ from moodle_cli.auth import resolve_token
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
 from moodle_cli.downloads import download_file, plan_downloads
+from moodle_cli.errors import MoodleAPIError
 
 pytestmark = pytest.mark.live
 
@@ -93,3 +94,63 @@ def test_downloading_a_real_file_matches_the_declared_size(
         return
 
     pytest.skip("no starred course exposes a small enough file to smoke-test")
+
+
+def test_course_contents_url_modules_expose_a_real_link(live_client: MoodleClient) -> None:
+    """At least one course must have a url module whose target is not the Moodle page itself."""
+    for course in live_client.list_courses(view="all"):
+        for section in live_client.get_course_contents(course.id):
+            for module in section.modules:
+                for link in module.links:
+                    assert link.fileurl
+                    assert link.fileurl != module.url
+                    return
+    pytest.skip("no enrolled course currently has a url module")
+
+
+def test_get_announcements_reads_a_real_news_forum(live_client: MoodleClient) -> None:
+    """mod_forum_get_forum_discussions must stay exposed; get_discussions (no "forum_") is not."""
+    for course in live_client.list_courses(view="all"):
+        announcements = live_client.get_announcements(course.id)
+        if announcements:
+            assert announcements[0].subject
+            assert announcements[0].courseid == course.id
+            return
+    pytest.skip("no enrolled course currently has announcements")
+
+
+def test_get_assignments_and_status_round_trip(live_client: MoodleClient) -> None:
+    assignments = live_client.get_assignments()
+    if not assignments:
+        pytest.skip("no enrolled course currently has an assignment")
+
+    status = live_client.get_assignment_status(assignments[0].id)
+    assert isinstance(status.submitted, bool)
+    assert isinstance(status.graded, bool)
+
+
+def test_get_quizzes_and_status_round_trip(live_client: MoodleClient) -> None:
+    quizzes = live_client.get_quizzes()
+    if not quizzes:
+        pytest.skip("no enrolled course currently has a quiz")
+
+    status = live_client.get_quiz_status(quizzes[0].id)
+    assert status.attempt_count >= 0
+    assert isinstance(status.has_grade, bool)
+
+
+def test_get_grade_overview_always_succeeds(live_client: MoodleClient) -> None:
+    """Unlike get_grade_items, this must never raise nopermissiontoviewgrades."""
+    live_client.get_grade_overview()
+
+
+def test_get_grade_items_either_succeeds_or_reports_the_known_permission_error(
+    live_client: MoodleClient,
+) -> None:
+    for grade in live_client.get_grade_overview():
+        try:
+            live_client.get_grade_items(grade.courseid)
+        except MoodleAPIError as exc:
+            assert exc.errorcode == "nopermissiontoviewgrades"
+        return
+    pytest.skip("no course grade overview to test against")

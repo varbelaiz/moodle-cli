@@ -6,6 +6,7 @@ ignores unknown keys rather than tracking the full upstream schema.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -85,6 +86,15 @@ class Module(_Base):
     def files(self) -> list[CourseFile]:
         return [c for c in self.contents if c.is_downloadable]
 
+    @property
+    def links(self) -> list[CourseFile]:
+        """External link entries, e.g. a ``url``-type module's actual target.
+
+        These carry no bytes to download, but the destination itself is real information
+        that ``files`` deliberately excludes.
+        """
+        return [c for c in self.contents if c.type == "url" and c.fileurl]
+
 
 class Section(_Base):
     id: int
@@ -118,6 +128,131 @@ class Participant(_Base):
     @property
     def last_course_access(self) -> datetime | None:
         return _epoch_to_datetime(self.lastcourseaccess)
+
+
+class Announcement(_Base):
+    """A post in a course's news forum.
+
+    ``courseid`` is not part of the raw discussion payload; ``MoodleClient.get_announcements``
+    injects it so callers aggregating across courses can tell posts apart.
+    """
+
+    id: int
+    courseid: int = 0
+    subject: str = ""
+    message: str = ""
+    userfullname: str = ""
+    created: int = 0
+    numreplies: int = 0
+    pinned: bool = False
+
+    @property
+    def posted_at(self) -> datetime | None:
+        return _epoch_to_datetime(self.created)
+
+    @property
+    def message_text(self) -> str:
+        """``message`` with HTML tags stripped; forum posts arrive as HTML."""
+        return re.sub(r"<[^>]+>", "", self.message).strip()
+
+
+class Assignment(_Base):
+    id: int
+    cmid: int = 0
+    course: int = 0
+    name: str = ""
+    duedate: int = 0
+    allowsubmissionsfromdate: int = 0
+    cutoffdate: int = 0
+    grade: float = 0
+
+    @property
+    def due_at(self) -> datetime | None:
+        return _epoch_to_datetime(self.duedate)
+
+
+class AssignmentStatus(_Base):
+    """Curated view of ``mod_assign_get_submission_status``.
+
+    The raw response nests submission data under plugin-specific shapes that vary with
+    which submission methods (file, online text, ...) the assignment enables. Rather than
+    model that whole tree, ``MoodleClient.get_assignment_status`` extracts the fields
+    below by hand.
+    """
+
+    status: str | None = None
+    gradingstatus: str = ""
+    grade: str | None = None
+    gradefordisplay: str = ""
+    extensionduedate: int = 0
+    submitted_files: list[str] = Field(default_factory=list)
+
+    @property
+    def submitted(self) -> bool:
+        return self.status == "submitted"
+
+    @property
+    def graded(self) -> bool:
+        return self.gradingstatus == "graded"
+
+    @property
+    def extension_due_at(self) -> datetime | None:
+        return _epoch_to_datetime(self.extensionduedate)
+
+
+class Quiz(_Base):
+    id: int
+    coursemodule: int = 0
+    course: int = 0
+    name: str = ""
+    timeopen: int = 0
+    timeclose: int = 0
+    attempts: int = 0
+    grade: float = 0
+
+    @property
+    def opens_at(self) -> datetime | None:
+        return _epoch_to_datetime(self.timeopen)
+
+    @property
+    def closes_at(self) -> datetime | None:
+        return _epoch_to_datetime(self.timeclose)
+
+
+class QuizStatus(_Base):
+    """Combines ``mod_quiz_get_user_attempts`` and ``mod_quiz_get_user_best_grade``.
+
+    Neither call alone answers "did I take this and how did it go" — attempts carries no
+    grade, and the best-grade call carries no attempt history.
+    """
+
+    attempt_count: int = 0
+    last_state: str | None = None
+    has_grade: bool = False
+    grade: float | None = None
+    grade_to_pass: float | None = None
+
+
+class CourseGrade(_Base):
+    courseid: int
+    grade: str = ""
+    rank: str | None = None
+
+
+class GradeItem(_Base):
+    """A row in a course's per-item grade breakdown.
+
+    A category subtotal row carries no ``itemname`` and no ``itemmodule`` — both arrive
+    ``null`` rather than absent or empty.
+    """
+
+    itemname: str | None = None
+    itemmodule: str | None = None
+    graderaw: float | None = None
+    grademax: float = 0
+    gradeformatted: str = ""
+    percentageformatted: str = ""
+    feedback: str = ""
 
 
 class SiteInfo(_Base):

@@ -75,6 +75,65 @@ def participants_payload() -> list[dict[str, Any]]:
 
 
 @pytest.fixture
+def forums_payload() -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = load_fixture("forums.json")
+    return payload
+
+
+@pytest.fixture
+def discussions_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("discussions.json")
+    return payload
+
+
+@pytest.fixture
+def assignments_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("assignments.json")
+    return payload
+
+
+@pytest.fixture
+def submission_status_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("submission_status.json")
+    return payload
+
+
+@pytest.fixture
+def grades_overview_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("grades_overview.json")
+    return payload
+
+
+@pytest.fixture
+def grade_items_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("grade_items.json")
+    return payload
+
+
+@pytest.fixture
+def site_info_payload() -> dict[str, Any]:
+    return {"userid": 63643, "functions": []}
+
+
+@pytest.fixture
+def quizzes_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("quizzes.json")
+    return payload
+
+
+@pytest.fixture
+def quiz_attempts_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("quiz_attempts.json")
+    return payload
+
+
+@pytest.fixture
+def quiz_best_grade_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("quiz_best_grade.json")
+    return payload
+
+
+@pytest.fixture
 def tmp_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.chdir(tmp_path)
     yield tmp_path

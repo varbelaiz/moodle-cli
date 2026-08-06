@@ -1,0 +1,23 @@
+{
+  "discussions": [
+    {
+      "id": 9000,
+      "subject": "Bienvenida al curso",
+      "message": "<p>Bienvenidos, el programa está disponible en la sección General.</p>",
+      "userfullname": "Docente de Prueba",
+      "created": 1772852400,
+      "numreplies": 0,
+      "pinned": false
+    },
+    {
+      "id": 9001,
+      "subject": "Cambio de aula para la clase del jueves",
+      "message": "<p>Estimados,</p><p>La clase del jueves se dicta en el aula <strong>S004</strong>.</p>",
+      "userfullname": "Docente de Prueba",
+      "created": 1783108601,
+      "numreplies": 2,
+      "pinned": true
+    }
+  ],
+  "warnings": []
+}

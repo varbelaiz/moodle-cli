@@ -1,0 +1,31 @@
+{
+  "usergrades": [
+    {
+      "courseid": 101,
+      "userid": 1,
+      "gradeitems": [
+        {
+          "itemname": "TP1",
+          "itemtype": "mod",
+          "itemmodule": "assign",
+          "graderaw": 10,
+          "grademax": 10,
+          "gradeformatted": "10.00",
+          "percentageformatted": "100.00 %",
+          "feedback": ""
+        },
+        {
+          "itemname": "Curso total",
+          "itemtype": "course",
+          "itemmodule": null,
+          "graderaw": 85,
+          "grademax": 100,
+          "gradeformatted": "85.00",
+          "percentageformatted": "85.00 %",
+          "feedback": ""
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
