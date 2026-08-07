@@ -262,9 +262,11 @@ class MoodleClient:
     def get_quiz_status(self, quiz_id: int) -> QuizStatus:
         """Attempt history and best grade for one quiz.
 
-        Two sources, because neither alone answers "did I take this and how did it go":
-        ``mod_quiz_get_user_attempts`` carries no grade and
-        ``mod_quiz_get_user_best_grade`` carries no attempt history.
+        Three sources, because none alone answers "did I take this and how did it go":
+        ``mod_quiz_get_user_attempts`` carries no grade, ``mod_quiz_get_user_best_grade``
+        carries no attempt history, and neither reports the maximum the grade is already
+        scaled to — that lives on the quiz, and is fetched only when there is a grade to
+        scale.
         """
         attempts_body = self._call(
             "mod_quiz_get_user_attempts", quizid=quiz_id, status="all", includepreviews=0
@@ -280,7 +282,12 @@ class MoodleClient:
             has_grade=has_grade,
             grade=grade_body.get("grade"),
             grade_to_pass=grade_body.get("gradetopass"),
+            max_grade=self._quiz_max_grade(quiz_id) if has_grade else None,
         )
+
+    def _quiz_max_grade(self, quiz_id: int) -> float | None:
+        """The maximum a quiz grades out of; ``None`` when the quiz is no longer listed."""
+        return next((q.grade for q in self.get_quizzes() if q.id == quiz_id), None)
 
     def get_grade_overview(self) -> list[CourseGrade]:
         """Course-level grade summary across every enrolled course.

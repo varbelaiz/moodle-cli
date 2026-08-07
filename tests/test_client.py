@@ -398,11 +398,13 @@ def test_get_quiz_status_combines_attempts_and_best_grade(
     client: MoodleClient,
     quiz_attempts_payload: dict[str, Any],
     quiz_best_grade_payload: dict[str, Any],
+    quizzes_payload: dict[str, Any],
 ) -> None:
     respx.post(REST_URL).mock(
         side_effect=[
             httpx.Response(200, json=quiz_attempts_payload),
             httpx.Response(200, json=quiz_best_grade_payload),
+            httpx.Response(200, json=quizzes_payload),
         ]
     )
 
@@ -413,6 +415,7 @@ def test_get_quiz_status_combines_attempts_and_best_grade(
     assert status.has_grade is True
     assert status.grade == 6.925
     assert status.grade_to_pass == 4
+    assert status.max_grade == 10
 
 
 @respx.mock
@@ -433,7 +436,7 @@ def test_get_quiz_status_tolerates_an_attempt_without_a_state(client: MoodleClie
 
 @respx.mock
 def test_get_quiz_status_handles_no_attempts_yet(client: MoodleClient) -> None:
-    respx.post(REST_URL).mock(
+    route = respx.post(REST_URL).mock(
         side_effect=[
             httpx.Response(200, json={"attempts": [], "warnings": []}),
             httpx.Response(200, json={"hasgrade": False, "gradetopass": 60, "warnings": []}),
@@ -445,6 +448,8 @@ def test_get_quiz_status_handles_no_attempts_yet(client: MoodleClient) -> None:
     assert status.attempt_count == 0
     assert status.last_state is None
     assert status.has_grade is False
+    assert status.max_grade is None
+    assert len(route.calls) == 2
 
 
 # -- grades ----------------------------------------------------------------------

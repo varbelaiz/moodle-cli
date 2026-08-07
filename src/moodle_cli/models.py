@@ -307,6 +307,8 @@ class QuizStatus(_Base):
     has_grade: bool = False
     grade: float | None = None
     grade_to_pass: float | None = None
+    #: The maximum ``grade`` and ``grade_to_pass`` are scaled to.
+    max_grade: float | None = None
 
 
 class CourseGrade(_Base):
