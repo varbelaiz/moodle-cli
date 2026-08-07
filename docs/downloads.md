@@ -35,3 +35,40 @@ a failure and nothing partial is left behind.
 The MCP tool writes to disk and returns a manifest of paths, sizes and per-file status —
 never file contents. A course can hold hundreds of megabytes; read whatever is needed
 from disk afterwards instead.
+
+Example CLI output (not `--json`; there is no JSON mode for this command):
+
+```
+CS101: 2 files, 4.9 MB -> CS101/
+  ok    Week 1/syllabus.pdf (200.0 KB)
+  skip  Week 1/slides.pdf
+
+2 downloaded, 1 already present
+```
+
+Example `download_course_files` response with `dry_run: true`:
+
+```json
+{
+  "course": "CS101",
+  "directory": "CS101",
+  "dry_run": true,
+  "files": [
+    {"path": "CS101/Week 1/syllabus.pdf", "size": 204800, "module_type": "resource", "status": "planned"}
+  ]
+}
+```
+
+A real run replaces `dry_run` with a `summary`, and each file's `status` becomes
+`downloaded`, `skipped`, or `failed` (with an `error` message):
+
+```json
+{
+  "course": "CS101",
+  "directory": "CS101",
+  "summary": {"downloaded": 1, "already_present": 0, "failed": 0},
+  "files": [
+    {"path": "CS101/Week 1/syllabus.pdf", "size": 204800, "module_type": "resource", "status": "downloaded"}
+  ]
+}
+```
