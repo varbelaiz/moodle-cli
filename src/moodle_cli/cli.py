@@ -5,8 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import textwrap
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, ParamSpec, TypeVar
@@ -17,7 +16,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from moodle_cli.auth import TokenStore, mint_token, resolve_token
+from moodle_cli.auth import TokenStore, mint_token
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
 from moodle_cli.downloads import (
@@ -37,6 +36,7 @@ from moodle_cli.models import (
     epoch_to_datetime,
 )
 from moodle_cli.search import SearchHit, search_contents
+from moodle_cli.session import open_client
 
 console = Console()
 err_console = Console(stderr=True)
@@ -97,13 +97,6 @@ def handle_errors(func: Callable[P, R]) -> Callable[P, R]:
     return wrapper
 
 
-@contextmanager
-def _client() -> Iterator[MoodleClient]:
-    config = load_config()
-    with MoodleClient(config.base_url, resolve_token(config)) as client:
-        yield client
-
-
 def _emit_json(payload: Any) -> None:
     console.print_json(json.dumps(payload, ensure_ascii=False, default=str))
 
@@ -158,6 +151,9 @@ def auth_login(
     token = mint_token(config.base_url, user, password)
     stored = TokenStore().set(config.keyring_key, token)
 
+    # The one place that builds a client directly: the token being verified is the one just
+    # minted, so resolving would consult the environment and the keyring instead and could
+    # answer with a different token than the login produced.
     with MoodleClient(config.base_url, token) as client:
         info = client.get_site_info()
 
@@ -175,9 +171,7 @@ def auth_login(
 @handle_errors
 def auth_status() -> None:
     """Show whether a usable token exists, and who it belongs to."""
-    config = load_config()
-    token = resolve_token(config, allow_mint=False)
-    with MoodleClient(config.base_url, token) as client:
+    with open_client(allow_mint=False) as client:
         info = client.get_site_info()
     console.print(f"[green]Authenticated[/green] as {info.fullname} (id {info.userid})")
     console.print(f"  site: {info.sitename}")
@@ -212,7 +206,7 @@ def courses_list(
     campus never sets one. In practice 'in-progress' returns everything and 'past'/'future'
     return nothing; only 'all', 'starred' and 'hidden' discriminate.
     """
-    with _client() as client:
+    with open_client() as client:
         courses = client.list_courses(view=view.value, sort=sort.value)
 
     if as_json:
@@ -247,7 +241,7 @@ def courses_grades(as_json: JsonOpt = False) -> None:
     Works even for a course whose gradebook is not open to students. For a per-item
     breakdown of one course, use `course grades` instead.
     """
-    with _client() as client:
+    with open_client() as client:
         course_names = _course_names(client)
         overview = client.get_grade_overview()
 
@@ -276,7 +270,7 @@ def courses_assignments(as_json: JsonOpt = False) -> None:
     Ordered by due date, undated last, so the next deadline is at the top. For one course,
     use `course assignments`.
     """
-    with _client() as client:
+    with open_client() as client:
         course_names = _course_names(client)
         assignments = sorted(client.get_assignments(), key=_by_due_date)
 
@@ -340,7 +334,7 @@ def courses_search(
     github.com finds it. The match column names what was hit; when it is an activity name,
     the files and links shown are the activity's whole contents rather than a filtered set.
     """
-    with _client() as client:
+    with open_client() as client:
         results = search_contents(client, query)
 
     if as_json:
@@ -383,7 +377,7 @@ def _hit_contents(hit: SearchHit) -> str:
 @handle_errors
 def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
     """Show a course's sections, activities, downloadable files and external links."""
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         sections = client.get_course_contents(resolved.id)
 
@@ -482,10 +476,8 @@ def course_download(
     filename. A --file name that matches nothing is an error rather than a silent
     zero-file download, so a typo fails loudly.
     """
-    config = load_config()
-    token = resolve_token(config)
-
-    with MoodleClient(config.base_url, token) as client:
+    with open_client() as client:
+        token = client.token
         resolved = client.resolve_course(course)
         contents = client.get_course_contents(resolved.id)
 
@@ -599,7 +591,7 @@ def course_participants(
     Email addresses are withheld unless --emails is passed: the API returns them for every
     participant, and they are not something to spill into a terminal or a log by default.
     """
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         participants = client.get_participants(resolved.id)
 
@@ -641,7 +633,7 @@ def course_announcements(course: CourseArg, as_json: JsonOpt = False) -> None:
     Only a forum Moodle marks as "news" carries announcements; a course without one
     prints nothing.
     """
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         announcements = client.get_announcements([resolved.id])
 
@@ -689,7 +681,7 @@ def course_assignments(course: CourseArg, as_json: JsonOpt = False) -> None:
 
     For every course at once, use `courses assignments`.
     """
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         assignments = client.get_assignments([resolved.id])
 
@@ -733,7 +725,7 @@ def course_assignment_status(assignment_id: AssignmentIdArg, as_json: JsonOpt = 
     `assignment_id` is the id from `course assignments` — not a course-module id, which
     this call rejects.
     """
-    with _client() as client:
+    with open_client() as client:
         status = client.get_assignment_status(assignment_id)
 
     if as_json:
@@ -756,7 +748,7 @@ def course_assignment_status(assignment_id: AssignmentIdArg, as_json: JsonOpt = 
 @handle_errors
 def course_quizzes(course: CourseArg, as_json: JsonOpt = False) -> None:
     """List a course's quizzes and their open/close windows."""
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         quizzes = client.get_quizzes([resolved.id])
 
@@ -801,7 +793,7 @@ def course_quiz_status(
     lookup to that course; without it every enrolled course's quizzes are fetched, since a
     quiz id alone does not say which course holds it.
     """
-    with _client() as client:
+    with open_client() as client:
         course_id = client.resolve_course(course).id if course else None
         status = client.get_quiz_status(quiz_id, course_id=course_id)
 
@@ -832,7 +824,7 @@ def course_grades(course: CourseArg, as_json: JsonOpt = False) -> None:
     Fails if the instructor has not opened the gradebook to students in this course;
     `courses grades` still works in that case, just without per-item detail.
     """
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         items = client.get_grade_items(resolved.id)
 
