@@ -230,6 +230,44 @@ def courses_list(
     console.print(table)
 
 
+@courses_app.command("grades")
+@handle_errors
+def courses_grades(as_json: JsonOpt = False) -> None:
+    """Show a grade summary across every enrolled course.
+
+    Works even for a course whose gradebook is not open to students. For a per-item
+    breakdown of one course, use `course grades` instead.
+    """
+    with _client() as client:
+        course_names = _course_names(client)
+        overview = client.get_grade_overview()
+
+    if as_json:
+        _emit_json(
+            [
+                {"course": course_names.get(g.courseid, str(g.courseid)), "grade": g.grade}
+                for g in overview
+            ]
+        )
+        return
+
+    table = Table(title=f"Grade summary ({len(overview)} {_plural(len(overview), 'course')})")
+    table.add_column("course")
+    table.add_column("grade", justify="right")
+    for g in overview:
+        table.add_row(escape(course_names.get(g.courseid, str(g.courseid))), g.grade or "-")
+    console.print(table)
+
+
+def _course_names(client: MoodleClient) -> dict[int, str]:
+    """Shortname per course id, for labelling rows that carry only an id.
+
+    Includes courses hidden from the dashboard: the grade and assignment endpoints answer
+    for every enrolment, so anything narrower leaves a bare id in the output.
+    """
+    return {c.id: c.shortname for c in client.list_courses(view="all-including-hidden")}
+
+
 def _short_name(fullname: str, shortname: str) -> str:
     """Drop the course code the fullname repeats from the shortname.
 
@@ -569,6 +607,31 @@ def _announcement_payload(announcement: Announcement, course: str) -> dict[str, 
         "replies": announcement.numreplies,
         "pinned": announcement.pinned,
     }
+
+
+@course_app.command("grades")
+@handle_errors
+def course_grades(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """Show the per-item grade breakdown for one course: assignments, quizzes, etc.
+
+    Fails if the instructor has not opened the gradebook to students in this course;
+    `courses grades` still works in that case, just without per-item detail.
+    """
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        items = client.get_grade_items(resolved.id)
+
+    if as_json:
+        _emit_json([i.model_dump(mode="json") for i in items])
+        return
+
+    table = Table(title=f"Grades for {resolved.shortname}")
+    table.add_column("item")
+    table.add_column("grade", justify="right")
+    table.add_column("max", justify="right", style="dim")
+    for i in items:
+        table.add_row(escape(i.label), i.gradeformatted or "-", str(i.grademax))
+    console.print(table)
 
 
 def main() -> None:

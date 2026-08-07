@@ -9,7 +9,16 @@ from typing import Any
 import httpx
 
 from moodle_cli.errors import MoodleAPIError, MoodleError
-from moodle_cli.models import Announcement, Course, Forum, Participant, Section, SiteInfo
+from moodle_cli.models import (
+    Announcement,
+    Course,
+    CourseGrade,
+    Forum,
+    GradeItem,
+    Participant,
+    Section,
+    SiteInfo,
+)
 
 REST_PATH = "/webservice/rest/server.php"
 
@@ -192,6 +201,30 @@ class MoodleClient:
 
         announcements.sort(key=lambda a: a.created, reverse=True)
         return announcements
+
+    def get_grade_overview(self) -> list[CourseGrade]:
+        """Course-level grade summary across every enrolled course.
+
+        Unlike :meth:`get_grade_items`, this works regardless of whether an instructor
+        has enabled the gradebook for students in a given course.
+        """
+        info = self.get_site_info()
+        body = self._call("gradereport_overview_get_course_grades", userid=info.userid)
+        return [CourseGrade.model_validate(g) for g in body.get("grades") or []]
+
+    def get_grade_items(self, course_id: int) -> list[GradeItem]:
+        """Per-item grade breakdown for one course.
+
+        Raises :class:`MoodleAPIError` with ``errorcode == "nopermissiontoviewgrades"``
+        when the instructor has not enabled the gradebook for students in this course —
+        this is a per-course setting, not a blanket token restriction.
+        """
+        info = self.get_site_info()
+        body = self._call(
+            "gradereport_user_get_grade_items", courseid=course_id, userid=info.userid
+        )
+        usergrades = body.get("usergrades") or [{}]
+        return [GradeItem.model_validate(item) for item in usergrades[0].get("gradeitems") or []]
 
     # -- convenience -------------------------------------------------------------
 

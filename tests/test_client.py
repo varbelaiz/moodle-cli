@@ -269,6 +269,88 @@ def test_get_announcements_raises_on_a_warning_beside_the_discussions(
     assert "errorreadingforum" in str(exc.value)
 
 
+# -- grades ----------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_grade_overview_uses_the_tokens_own_user_id(
+    client: MoodleClient, grades_overview_payload: dict[str, Any]
+) -> None:
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(200, json=grades_overview_payload),
+        ]
+    )
+
+    grades = client.get_grade_overview()
+
+    assert posted_params(route.calls[1].request)["userid"] == "63643"
+    assert [g.courseid for g in grades] == [101, 102]
+    assert grades[0].grade == "85.00"
+    # A course with nothing graded yet reports a null grade, not an empty string.
+    assert grades[1].grade == ""
+
+
+@respx.mock
+def test_get_grade_items_returns_the_first_users_items(
+    client: MoodleClient, grade_items_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(200, json=grade_items_payload),
+        ]
+    )
+
+    items = client.get_grade_items(101)
+
+    assert [i.itemname for i in items] == ["TP1", None, None]
+    assert items[0].gradeformatted == "10.00"
+
+
+@respx.mock
+def test_an_aggregate_grade_row_is_named_by_its_item_type(
+    client: MoodleClient, grade_items_payload: dict[str, Any]
+) -> None:
+    """A course-total or category row carries no itemname and no itemmodule: both null."""
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(200, json=grade_items_payload),
+        ]
+    )
+
+    items = client.get_grade_items(101)
+
+    assert [i.label for i in items] == ["TP1", "Category subtotal", "Course total"]
+    assert all(i.itemmodule is None for i in items[1:])
+    # A null feedback reaches a str field and must not raise.
+    assert items[-1].feedback == ""
+
+
+@respx.mock
+def test_get_grade_items_surfaces_missing_gradebook_permission(client: MoodleClient) -> None:
+    """A per-course setting, not a token-wide block: get_grade_overview is unaffected."""
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(
+                200,
+                json={
+                    "exception": "moodle_exception",
+                    "errorcode": "nopermissiontoviewgrades",
+                    "message": "No se pueden ver las calificaciones.",
+                },
+            ),
+        ]
+    )
+
+    with pytest.raises(MoodleAPIError) as excinfo:
+        client.get_grade_items(101)
+    assert excinfo.value.errorcode == "nopermissiontoviewgrades"
+
+
 # -- course resolution -----------------------------------------------------------
 
 

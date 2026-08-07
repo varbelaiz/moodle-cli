@@ -17,7 +17,12 @@ from typer.testing import CliRunner
 
 from moodle_cli.cli import app
 from moodle_cli.errors import MoodleAPIError
-from moodle_cli.mcp_server import get_course_announcements, search_courses
+from moodle_cli.mcp_server import (
+    get_course_announcements,
+    get_grade_summary,
+    get_grades,
+    search_courses,
+)
 from tests.conftest import REST_URL, posted_params, route_by_function
 
 pytestmark = pytest.mark.usefixtures("configured_env")
@@ -213,3 +218,104 @@ def test_get_course_announcements_matches_the_cli_json_field_for_field(
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == from_tool
+
+
+# -- assignments and grades ----------------------------------------------------------
+
+
+@respx.mock
+def test_get_grade_summary_labels_courses_by_shortname(
+    courses_payload: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    results = get_grade_summary()
+
+    assert results == [
+        {"course": "IOS460 - 123246", "grade": "85.00"},
+        {"course": "I312 - 106931", "grade": ""},
+    ]
+
+
+@respx.mock
+def test_a_course_hidden_from_the_dashboard_is_still_named(
+    courses_payload: dict[str, Any],
+    hidden_course: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    """The grade endpoints answer for every enrolment, so the course lookup must too."""
+    grades_overview_payload["grades"].append({"courseid": 104, "grade": "70.00"})
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=lambda body: (
+            {"courses": [*courses_payload["courses"], hidden_course]}
+            if "classification=allincludinghidden" in body
+            else courses_payload
+        ),
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    assert get_grade_summary()[-1] == {"course": "I204 - 101313", "grade": "70.00"}
+
+
+@respx.mock
+def test_get_grades_returns_per_item_breakdown(
+    courses_payload: dict[str, Any],
+    grade_items_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items=grade_items_payload,
+    )
+
+    results = get_grades("IOS460")
+
+    assert [r["item"] for r in results] == ["TP1", "Category subtotal", "Course total"]
+    assert results[0]["grade"] == "10.00"
+
+
+@respx.mock
+def test_gradebook_feedback_is_emitted_as_text_not_html(
+    courses_payload: dict[str, Any],
+    grade_items_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items=grade_items_payload,
+    )
+
+    results = get_grades("IOS460")
+
+    assert results[0]["feedback"] == "Buen trabajo.\nRevisar la sección 3."
+    assert results[-1]["feedback"] == ""
+
+
+@respx.mock
+def test_get_grades_surfaces_the_permission_error_instead_of_hiding_it(
+    courses_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    """A course with no visible gradebook should fail loudly, not return an empty list."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items={
+            "exception": "moodle_exception",
+            "errorcode": "nopermissiontoviewgrades",
+            "message": "No se pueden ver las calificaciones.",
+        },
+    )
+
+    with pytest.raises(MoodleAPIError, match="nopermissiontoviewgrades"):
+        get_grades("IOS460")

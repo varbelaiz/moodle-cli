@@ -206,6 +206,37 @@ class Forum(_Base):
     name: str = ""
 
 
+class CourseGrade(_Base):
+    courseid: int
+    grade: _Text = ""
+
+
+#: ``itemtype`` -> name for the rows Moodle sends with a null ``itemname``.
+_ITEM_TYPE_LABELS = {"course": "Course total", "category": "Category subtotal"}
+
+
+class GradeItem(_Base):
+    """A row in a course's per-item grade breakdown.
+
+    A category subtotal row carries no ``itemname`` and no ``itemmodule`` — both arrive
+    ``null`` rather than absent or empty. ``itemtype`` is what identifies such a row.
+    """
+
+    itemname: str | None = None
+    itemtype: str | None = None
+    itemmodule: str | None = None
+    graderaw: float | None = None
+    grademax: _Number = 0
+    gradeformatted: _Text = ""
+    percentageformatted: _Text = ""
+    feedback: _Text = ""
+
+    @property
+    def label(self) -> str:
+        """A name for the row, including the aggregate rows Moodle leaves unnamed."""
+        return self.itemname or _ITEM_TYPE_LABELS.get(self.itemtype or "", "-")
+
+
 class SiteInfo(_Base):
     sitename: str = ""
     username: str = ""

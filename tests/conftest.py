@@ -89,6 +89,24 @@ def courses_payload() -> dict[str, Any]:
 
 
 @pytest.fixture
+def hidden_course() -> dict[str, Any]:
+    """A course the dashboard filters out; only the all-including-hidden view returns it."""
+    return {
+        "id": 104,
+        "fullname": "I204 - Sistemas Operativos (grupo 1) G:1 Teó 1 - 1er. Semestre 2025",
+        "shortname": "I204 - 101313",
+        "startdate": 1736910000,
+        "enddate": 0,
+        "visible": True,
+        "viewurl": f"{BASE_URL}/course/view.php?id=104",
+        "progress": None,
+        "isfavourite": False,
+        "hidden": True,
+        "coursecategory": "Ingeniería en Inteligencia Artificial",
+    }
+
+
+@pytest.fixture
 def contents_payload() -> list[dict[str, Any]]:
     payload: list[dict[str, Any]] = load_fixture("contents.json")
     return payload
@@ -110,6 +128,23 @@ def forums_payload() -> list[dict[str, Any]]:
 def discussions_payload() -> dict[str, Any]:
     payload: dict[str, Any] = load_fixture("discussions.json")
     return payload
+
+
+@pytest.fixture
+def grades_overview_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("grades_overview.json")
+    return payload
+
+
+@pytest.fixture
+def grade_items_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("grade_items.json")
+    return payload
+
+
+@pytest.fixture
+def site_info_payload() -> dict[str, Any]:
+    return {"userid": 63643, "functions": []}
 
 
 @pytest.fixture

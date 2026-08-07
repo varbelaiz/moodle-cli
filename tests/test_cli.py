@@ -400,3 +400,147 @@ def test_announcements_report_nothing_for_a_course_whose_forums_are_all_general(
 
     assert result.exit_code == 0
     assert "No announcements" in result.output
+
+
+@respx.mock
+def test_courses_grades_shows_the_summary_across_courses(
+    courses_payload: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "grades"])
+
+    assert result.exit_code == 0
+    assert "IOS460 - 123246" in result.output
+    assert "85.00" in result.output
+
+
+@respx.mock
+def test_a_course_hidden_from_the_dashboard_is_still_named(
+    courses_payload: dict[str, Any],
+    hidden_course: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    """The overview covers every enrolment, so a narrower course lookup leaves a bare id."""
+    grades_overview_payload["grades"].append({"courseid": 104, "grade": "70.00"})
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=lambda body: (
+            {"courses": [*courses_payload["courses"], hidden_course]}
+            if "classification=allincludinghidden" in body
+            else courses_payload
+        ),
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "grades"])
+
+    assert result.exit_code == 0
+    assert "I204 - 101313" in result.output
+    assert "104" not in result.output
+
+
+@respx.mock
+def test_a_shortname_with_brackets_survives_the_table(
+    courses_payload: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    """Server-controlled text is data, not Rich markup: an unescaped [tag] is swallowed."""
+    courses_payload["courses"][0]["shortname"] = "IOS460 [grupo 2]"
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "grades"])
+
+    assert result.exit_code == 0
+    assert "IOS460 [grupo 2]" in result.output
+
+
+@respx.mock
+def test_a_single_course_is_counted_in_the_singular(
+    courses_payload: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    grades_overview_payload["grades"] = grades_overview_payload["grades"][:1]
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "grades"])
+
+    assert result.exit_code == 0
+    assert "Grade summary (1 course)" in result.output
+
+
+@respx.mock
+def test_course_grades_shows_the_per_item_breakdown(
+    courses_payload: dict[str, Any],
+    grade_items_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items=grade_items_payload,
+    )
+
+    result = runner.invoke(app, ["course", "grades", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "TP1" in result.output
+    assert "10.00" in result.output
+
+
+@respx.mock
+def test_an_aggregate_grade_row_is_named_by_its_item_type(
+    courses_payload: dict[str, Any],
+    grade_items_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    """The course total arrives with a null itemname; rendered as "-" it reads as blank."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items=grade_items_payload,
+    )
+
+    result = runner.invoke(app, ["course", "grades", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "Course total" in result.output
+    assert "Category subtotal" in result.output
+
+
+@respx.mock
+def test_course_grades_fails_loudly_without_gradebook_permission(
+    courses_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items={
+            "exception": "moodle_exception",
+            "errorcode": "nopermissiontoviewgrades",
+            "message": "No se pueden ver las calificaciones.",
+        },
+    )
+
+    result = runner.invoke(app, ["course", "grades", "IOS460"])
+
+    assert result.exit_code == 1
+    assert "nopermissiontoviewgrades" in result.output
