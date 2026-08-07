@@ -42,7 +42,10 @@ console = Console()
 err_console = Console(stderr=True)
 
 app = typer.Typer(
-    help="Access a Moodle campus: courses, contents, downloads, participants and announcements.",
+    help=(
+        "Access a Moodle campus: courses, contents, downloads, participants, "
+        "announcements, assignments and grades."
+    ),
     no_args_is_help=True,
     add_completion=False,
 )

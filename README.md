@@ -1,8 +1,9 @@
 # moodle-cli
 
 Command line client and MCP server for a Moodle campus. Lists your courses, reads their
-contents and announcements, downloads the material, and shows who is enrolled — over
-Moodle's web-service API, with no browser and no HTML scraping.
+contents and announcements, downloads the material, shows who is enrolled, and tracks
+assignments and grades — over Moodle's web-service API, with no browser and no HTML
+scraping.
 
 Works with any Moodle instance that has web services and the mobile service enabled.
 
@@ -12,10 +13,15 @@ Works with any Moodle instance that has web services and the mobile service enab
   - [`moodle auth`](#moodle-auth)
   - [`moodle courses list`](#moodle-courses-list)
   - [`moodle courses search`](#moodle-courses-search)
+  - [`moodle courses grades`](#moodle-courses-grades)
+  - [`moodle courses assignments`](#moodle-courses-assignments)
   - [`moodle course contents`](#moodle-course-contents)
   - [`moodle course download`](#moodle-course-download)
   - [`moodle course participants`](#moodle-course-participants)
   - [`moodle course announcements`](#moodle-course-announcements)
+  - [`moodle course assignments`](#moodle-course-assignments)
+  - [`moodle course assignment-status`](#moodle-course-assignment-status)
+  - [`moodle course grades`](#moodle-course-grades)
 - [MCP server](#mcp-server)
 - [Configuration](#configuration)
 - [Exit codes](#exit-codes)
@@ -131,6 +137,43 @@ narrowing rather than paging.
 The section number is part of every result, so a hit feeds straight into
 `course download --section N`.
 
+### `moodle courses grades`
+
+Shows a course-level grade summary across every enrolled course.
+
+```console
+$ moodle courses grades
+Grade summary (1 course)
+┏━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ course        ┃ grade ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ I204 - 101313 │ 51.50 │
+└───────────────┴───────┘
+```
+
+Only courses with a course-level grade appear. This works even for a course whose
+instructor has not opened the gradebook to students — use
+[`moodle course grades`](#moodle-course-grades) for the per-item breakdown of one course,
+which does require that.
+
+### `moodle courses assignments`
+
+Lists assignments and due dates across every enrolled course, soonest first.
+
+```console
+$ moodle courses assignments
+                        12 assignments
+┏━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃    id ┃ course          ┃ name               ┃        due ┃ grade ┃
+┡━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│ 40393 │ IOS460 - 123246 │ Actividad semana 1 │ 2026-03-11 │   100 │
+│ 40279 │ H202 - 119768   │ Trabajo Práctico 1 │ 2026-03-20 │ scale │
+└───────┴─────────────────┴────────────────────┴────────────┴───────┘
+```
+
+Assignments without a due date sort last. For one course, use
+[`moodle course assignments`](#moodle-course-assignments).
+
 ### `moodle course contents`
 
 Shows a course's sections, activities, downloadable files and external links.
@@ -238,6 +281,69 @@ forums are not included, and a course without a news forum prints nothing. Posts
 on the wire and are printed as text, one line per paragraph or list item. `--json` carries
 that same text under `message`, plus a `posted_at` timestamp that keeps the time of day.
 
+### `moodle course assignments`
+
+Lists a course's assignments and due dates.
+
+```console
+$ moodle course assignments H202
+          2 assignments in H202 - 119768
+┏━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃    id ┃ name               ┃        due ┃ grade ┃
+┡━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│ 40393 │ Actividad semana 1 │ 2026-03-11 │   100 │
+│ 40279 │ Trabajo Práctico 1 │ 2026-03-20 │ scale │
+└───────┴────────────────────┴────────────┴───────┘
+```
+
+The `grade` column is the maximum an assignment is worth. It reads `scale` when the
+assignment is marked with a named scale ("Aprobado", "Insuficiente") instead of points:
+that has no numeric maximum, and this listing does not carry the scale's name.
+[`assignment-status`](#moodle-course-assignment-status) shows the awarded value either way.
+
+The `id` column feeds [`moodle course assignment-status`](#moodle-course-assignment-status).
+
+### `moodle course assignment-status`
+
+Shows submission and grading status for one assignment.
+
+```console
+$ moodle course assignment-status 40393
+submitted: yes (submitted)
+graded: yes
+grade: 90.00 / 100.00
+files:
+  Entrega - Semana 1.pdf
+```
+
+`assignment-status` takes the `id` printed by `course assignments` — not a course-module
+id, which it rejects.
+
+### `moodle course grades`
+
+Shows the per-item grade breakdown for one course: assignments, quizzes, and the course
+total.
+
+```console
+$ moodle course grades I204
+          Grades for I204 - 101313
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃ item                      ┃ grade ┃   max ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━┩
+│ TP1                       │ 10.00 │  10.0 │
+│ TP2                       │ 10.00 │  10.0 │
+│ Examen Final              │  6.00 │ 100.0 │
+│ Course total              │ 51.50 │ 100.0 │
+└───────────────────────────┴───────┴───────┘
+```
+
+Moodle sends the course total and any category subtotal without a name; those rows are
+labelled by their type.
+
+Fails with a clear error if the instructor has not opened the gradebook to students in
+this course; [`moodle courses grades`](#moodle-courses-grades) still works in that case,
+just without the per-item detail.
+
 ## MCP server
 
 Exposes the same functionality to an agent over stdio.
@@ -254,6 +360,10 @@ claude mcp add moodle -- uv run --project /path/to/moodle-cli moodle-mcp
 | `download_course_files` | `course`, `output_dir`, `sections[]`, `module_types[]`, `files[]`, `match[]`, `dry_run` |
 | `list_participants` | `course`, `role`, `include_emails` (default `false`) |
 | `get_course_announcements` | `course` (default: every enrolled course) |
+| `get_assignments` | `course` (default: every enrolled course) |
+| `get_assignment_status` | `assignment_id` |
+| `get_grade_summary` | — |
+| `get_grades` | `course` |
 
 `download_course_files` writes to disk and returns a manifest of paths, sizes and per-file
 status. It never returns file contents: a single course can hold hundreds of megabytes, and
@@ -265,6 +375,15 @@ any tool downloads. `search_courses` is `courses search`: one call over every en
 course, each result naming what it matched under `match` and carrying the `section_number`
 that `download_course_files` selects by. `get_course_announcements` returns the same fields
 as `course announcements --json`, so a consumer can learn the shape from either surface.
+
+`get_grades` raises if the instructor has not opened the gradebook to students in that
+course; `get_grade_summary` still works in that case, just without per-item detail. Its
+`feedback` is plain text, as every rich-text field here is.
+
+`get_assignments` reports `max_grade: null` alongside `scale_graded: true` for an
+assignment marked with a named scale rather than out of points. `get_assignment_status`
+returns the raw `grade` to compute with and `grade_display` as the campus renders it —
+the latter being the only form that names a scale grade such as "Aprobado".
 
 ## Configuration
 
@@ -311,6 +430,16 @@ and a JSON error body. Written to disk unchecked, that becomes a small JSON file
 **A `url` module's link is not a file.** `course contents` and `search_courses` show its
 actual destination as a `link`, separate from `files`; nothing downloads it, since there is
 nothing to download.
+
+**Per-item grades depend on the instructor, not on you.** `course grades` reads the
+gradebook detail for one course, which an instructor can leave closed to students. That
+shows up as an error, not an empty table — `courses grades` (the course-level summary)
+works regardless.
+
+**Not every assignment is marked out of points.** Moodle also marks with named scales, and
+records that as a negative grade holding the scale's id. An assignment marked that way has
+no numeric maximum to report: the listing says `scale`, and the awarded value is readable
+from `assignment-status`.
 
 ## Development
 
