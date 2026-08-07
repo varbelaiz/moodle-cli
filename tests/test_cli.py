@@ -12,29 +12,11 @@ import respx
 from typer.testing import CliRunner
 
 from moodle_cli.cli import app
-from tests.conftest import BASE_URL, REST_URL
+from tests.conftest import BASE_URL, REST_URL, route_by_function
 
 runner = CliRunner()
 
-
-@pytest.fixture(autouse=True)
-def configured_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A token in the environment keeps the CLI off the keyring and off login/token.php."""
-    monkeypatch.setenv("MOODLE_URL", BASE_URL)
-    monkeypatch.setenv("MOODLE_TOKEN", "test-token")
-
-
-def route_by_function(**payloads: Any) -> respx.Route:
-    """Dispatch the single REST endpoint on the wsfunction being requested."""
-
-    def responder(request: httpx.Request) -> httpx.Response:
-        body = request.content.decode()
-        for function, payload in payloads.items():
-            if f"wsfunction={function}" in body:
-                return httpx.Response(200, json=payload)
-        return httpx.Response(200, json={"errorcode": "unmocked", "message": body})
-
-    return respx.post(REST_URL).mock(side_effect=responder)
+pytestmark = pytest.mark.usefixtures("configured_env")
 
 
 @respx.mock

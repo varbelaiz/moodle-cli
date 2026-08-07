@@ -12,7 +12,9 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+import respx
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BASE_URL = "https://campus.example.edu"
@@ -78,3 +80,27 @@ def participants_payload() -> list[dict[str, Any]]:
 def tmp_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.chdir(tmp_path)
     yield tmp_path
+
+
+@pytest.fixture
+def configured_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A token in the environment keeps a surface off the keyring and off login/token.php.
+
+    Requested per module with ``pytest.mark.usefixtures`` so the auth tests keep an empty
+    environment and still exercise token resolution.
+    """
+    monkeypatch.setenv("MOODLE_URL", BASE_URL)
+    monkeypatch.setenv("MOODLE_TOKEN", "test-token")
+
+
+def route_by_function(**payloads: Any) -> respx.Route:
+    """Dispatch the single REST endpoint on the wsfunction being requested."""
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode()
+        for function, payload in payloads.items():
+            if f"wsfunction={function}" in body:
+                return httpx.Response(200, json=payload)
+        return httpx.Response(200, json={"errorcode": "unmocked", "message": body})
+
+    return respx.post(REST_URL).mock(side_effect=responder)
