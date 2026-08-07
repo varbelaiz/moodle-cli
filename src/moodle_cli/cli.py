@@ -35,9 +35,23 @@ from moodle_cli.models import (
     Section,
     epoch_to_datetime,
 )
-from moodle_cli.plugins import mount_commands
+from moodle_cli.plugins import (
+    CORE_DISTRIBUTION,
+    CatalogEntry,
+    catalog,
+    installed_extras,
+    mount_commands,
+)
 from moodle_cli.search import SearchHit, search_contents
 from moodle_cli.session import open_client
+from moodle_cli.toolenv import (
+    Environment,
+    detect,
+    injected_packages,
+    install_command,
+    pip_command,
+    run,
+)
 
 console = Console()
 err_console = Console(stderr=True)
@@ -53,9 +67,11 @@ app = typer.Typer(
 auth_app = typer.Typer(help="Manage authentication.", no_args_is_help=True)
 courses_app = typer.Typer(help="Work with your enrolled courses.", no_args_is_help=True)
 course_app = typer.Typer(help="Work with a single course.", no_args_is_help=True)
+plugins_app = typer.Typer(help="Manage optional plugins.", no_args_is_help=True)
 app.add_typer(auth_app, name="auth")
 app.add_typer(courses_app, name="courses")
 app.add_typer(course_app, name="course")
+app.add_typer(plugins_app, name="plugins")
 
 # Mounted at import rather than in main(), because the tests and any other embedder import
 # `app` directly; wiring only the entry point would give the plugin surface to a shell and
@@ -820,6 +836,205 @@ def course_grades(course: CourseArg, as_json: JsonOpt = False) -> None:
     for i in items:
         table.add_row(escape(i.label), i.gradeformatted or "-", str(i.grademax))
     console.print(table)
+
+
+# -- plugins ---------------------------------------------------------------------
+
+
+def _catalog_payload(entry: CatalogEntry) -> dict[str, Any]:
+    return {
+        "name": entry.name,
+        "distribution": entry.distribution,
+        "official": entry.official,
+        "status": "error" if entry.problem else "installed" if entry.installed else "available",
+        "version": entry.version,
+        "summary": entry.summary,
+        "command_group": entry.mounted_as,
+        "mcp_tools": list(entry.tools),
+        "problem": entry.problem,
+    }
+
+
+@plugins_app.command("list")
+@handle_errors
+def plugins_list(as_json: JsonOpt = False) -> None:
+    """List the official plugins and what each one adds.
+
+    Never reaches the network: a plugin you have not installed is listed from the extras
+    this release declares, so the command works offline and tells no index what you are
+    looking at. That is also why an uninstalled plugin has no description — the summary
+    lives in that package's own metadata, which is not on this machine yet.
+
+    Third-party plugins are listed too, marked as such. They cannot be installed from here,
+    but a command group appearing from nowhere is what this command exists to explain.
+    """
+    entries = catalog()
+    if as_json:
+        _emit_json([_catalog_payload(e) for e in entries])
+        return
+
+    if not entries:
+        console.print("[yellow]No plugins in the catalog for this release.[/yellow]")
+        return
+
+    table = Table(title=f"{len(entries)} plugins")
+    table.add_column("name", no_wrap=True)
+    table.add_column("source", no_wrap=True, style="dim")
+    table.add_column("status", no_wrap=True)
+    table.add_column("version", justify="right", style="dim", no_wrap=True)
+    table.add_column("adds", no_wrap=True)
+    table.add_column("description", ratio=1, overflow="ellipsis")
+    for entry in entries:
+        if entry.problem:
+            status = "[red]error[/red]"
+        elif entry.installed:
+            status = "[green]installed[/green]"
+        else:
+            status = "available"
+        adds = ", ".join(filter(None, [entry.mounted_as, *entry.tools])) or "-"
+        table.add_row(
+            entry.name,
+            "official" if entry.official else "third-party",
+            status,
+            entry.version or "-",
+            adds,
+            escape(entry.summary or "-"),
+        )
+    console.print(table)
+
+    # A plugin that is not installed here has no metadata to describe it, so the hint
+    # replaces the description rather than being squeezed into the column beside it.
+    if any(not entry.installed for entry in entries):
+        console.print("Install one with `moodle plugins install NAME`.")
+
+    for entry in entries:
+        if entry.problem:
+            err_console.print(f"[red]{entry.name}:[/red] {escape(entry.problem)}")
+
+
+def _known(name: str) -> CatalogEntry:
+    """The official catalog entry for `name`, or an error naming what is installable."""
+    for entry in catalog():
+        if entry.name != name:
+            continue
+        if entry.official:
+            return entry
+        raise MoodleError(
+            f"{name} is a third-party plugin, not one this CLI installs. Remove it with "
+            f"`uv pip uninstall {entry.distribution}`, or reinstall it the way you added it."
+        )
+    known = ", ".join(e.name for e in catalog() if e.official) or "none in this release"
+    raise MoodleError(f"No such plugin: {name!r}. Known plugins: {known}.")
+
+
+def _plan(name: str, *, keep: bool) -> tuple[Environment, list[str]]:
+    """The environment and the command that leaves it with `name` installed or removed."""
+    env = detect()
+    if env.kind == "editable":
+        raise MoodleError(
+            "This moodle is an editable install from a checkout. Change its extras there "
+            f"instead, with `uv sync --extra {name}`."
+        )
+    if env.uv is None:
+        spec = f"{CORE_DISTRIBUTION}[{name}]"
+        raise MoodleError(
+            f"uv is not on PATH, so this cannot change the installation itself. "
+            f"Install {spec!r} with the packaging tool you used for moodle-cli."
+        )
+
+    wanted = installed_extras() | {name} if keep else installed_extras() - {name}
+
+    if env.kind == "uv-tool":
+        injected = injected_packages(env.uv)
+        if injected is None:
+            spec = f"{CORE_DISTRIBUTION}[{','.join(sorted(wanted))}]"
+            raise MoodleError(
+                "Could not read the packages injected into this tool environment, and "
+                "reinstalling without them would remove them. Run "
+                f'`uv tool install --reinstall "{spec}"` yourself, '
+                "restating every --with package."
+            )
+        catalogued = {e.distribution for e in catalog()}
+        foreign = [p for p in injected if p.split("==")[0] not in catalogued]
+        return env, install_command(env.uv, wanted, foreign)
+
+    spec = f"{CORE_DISTRIBUTION}[{name}]" if keep else _known(name).distribution
+    return env, pip_command(env.uv, env.python, spec, uninstall=not keep)
+
+
+@plugins_app.command("install")
+@handle_errors
+def plugins_install(
+    name: Annotated[str, typer.Argument(help="Plugin name, as shown by `plugins list`.")],
+    as_json: JsonOpt = False,
+) -> None:
+    """Install an official plugin into this installation of moodle.
+
+    Extras and hand-injected packages belong to the environment rather than to a package,
+    so on a `uv tool` installation this rebuilds the whole install command from the current
+    state; anything added by hand with --with is carried across.
+    """
+    entry = _known(name)
+    if entry.installed:
+        message = f"{name} is already installed ({entry.distribution} {entry.version})."
+        if as_json:
+            _emit_json({"plugin": name, "action": "already-installed", "command": None})
+        else:
+            console.print(f"[green]{escape(message)}[/green]")
+        return
+
+    env, argv = _plan(name, keep=True)
+    output = run(argv, capture=as_json)
+
+    if as_json:
+        _emit_json(
+            {
+                "plugin": name,
+                "action": "installed",
+                "environment": env.kind,
+                "command": argv,
+                "output": output,
+            }
+        )
+        return
+    console.print(f"[green]Installed[/green] {name}. Its commands appear on the next run.")
+
+
+@plugins_app.command("uninstall")
+@handle_errors
+def plugins_uninstall(
+    name: Annotated[str, typer.Argument(help="Plugin name, as shown by `plugins list`.")],
+    as_json: JsonOpt = False,
+) -> None:
+    """Remove an official plugin from this installation of moodle."""
+    entry = _known(name)
+    if not entry.installed:
+        if as_json:
+            _emit_json({"plugin": name, "action": "not-installed", "command": None})
+        else:
+            console.print(f"[yellow]{name} is not installed.[/yellow]")
+        return
+
+    env, argv = _plan(name, keep=False)
+    output = run(argv, capture=as_json)
+
+    if as_json:
+        _emit_json(
+            {
+                "plugin": name,
+                "action": "uninstalled",
+                "environment": env.kind,
+                "command": argv,
+                "output": output,
+            }
+        )
+        return
+    console.print(f"[green]Removed[/green] {name}.")
+    if env.kind == "uv-managed":
+        console.print(
+            f"  the `{name}` extra still declares it, so installing "
+            f"`{CORE_DISTRIBUTION}[{name}]` again brings it back"
+        )
 
 
 def main() -> None:
