@@ -11,6 +11,7 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -42,6 +43,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 def load_fixture(name: str) -> Any:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def posted_params(request: httpx.Request) -> dict[str, str]:
+    """The form body of a REST call, decoded back into flat parameters."""
+    return {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
 
 
 @pytest.fixture(autouse=True)

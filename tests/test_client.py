@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -11,16 +10,12 @@ import respx
 
 from moodle_cli.client import SORTS, VIEWS, MoodleClient, _flatten_params, check_api_error
 from moodle_cli.errors import MoodleAPIError, MoodleError
-from tests.conftest import BASE_URL, REST_URL
+from tests.conftest import BASE_URL, REST_URL, posted_params
 
 
 @pytest.fixture
 def client() -> MoodleClient:
     return MoodleClient(BASE_URL, "test-token")
-
-
-def posted_params(request: httpx.Request) -> dict[str, str]:
-    return {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
 
 
 # -- error detection -------------------------------------------------------------
