@@ -11,6 +11,7 @@ Works with any Moodle instance that has web services and the mobile service enab
 - [Command reference](#command-reference)
   - [`moodle auth`](#moodle-auth)
   - [`moodle courses list`](#moodle-courses-list)
+  - [`moodle courses search`](#moodle-courses-search)
   - [`moodle course contents`](#moodle-course-contents)
   - [`moodle course download`](#moodle-course-download)
   - [`moodle course participants`](#moodle-course-participants)
@@ -99,9 +100,39 @@ $ moodle courses list --view starred --sort last-accessed
 The `--json` output carries more fields than the table, including `category`, `startdate`,
 `enddate`, `progress`, `hidden` and `viewurl`.
 
+### `moodle courses search`
+
+Searches section, activity, file and link names across every enrolled course at once,
+including the ones hidden from your dashboard. Answers "which course has X" without
+reading each course in turn.
+
+| Option | Description |
+| --- | --- |
+| `--json` | JSON output. |
+
+```console
+$ moodle courses search github.com
+                            2 results for 'github.com'
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┓
+┃ course          ┃ section             ┃ match  ┃ activity        ┃ files and links    ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩
+│ IOS460 - 123246 │ 15. Importante acc… │ link   │ Organización d… │ https://github.co… │
+└─────────────────┴─────────────────────┴────────┴─────────────────┴────────────────────┘
+```
+
+The match is a case-insensitive substring. Links match on their destination as well as on
+their label, so a bare domain finds them. The `match` column says what was hit — a section,
+an activity name, a file or a link — and that changes what the last column means: on an
+activity-name hit it lists the activity's whole contents, on a file or link hit only the
+entries that matched. Results are capped; a query that hits the cap says so, and wants
+narrowing rather than paging.
+
+The section number is part of every result, so a hit feeds straight into
+`course download --section N`.
+
 ### `moodle course contents`
 
-Shows a course's sections, activities and downloadable files.
+Shows a course's sections, activities, downloadable files and external links.
 
 ```console
 $ moodle course contents IOS460
@@ -115,11 +146,19 @@ IOS460 - 123246 — Taller de Desarrollo de Software
         840.6 KB  _Carátula licencia.pdf
          28.0 MB  Bass, L. Software Architecture in Practice.pdf
      lti        Clases Grabadas
+
+15. Importante acceder  (2 links)
+     url        Slack de la Materia
+            link  https://join.slack.com/t/example-course/shared_invite/...
+     url        Organización de GitHub de la materia
+            link  https://github.com/example-course
 ```
 
-Activities without downloadable files — forums, quizzes, assignments, external links — are
-listed without file entries. Filenames printed here can be passed verbatim to
-`course download --file`.
+Activities without downloadable files — forums, quizzes, assignments — are listed without
+file entries. A `url` module (an external link, e.g. a recorded-class or third-party site)
+shows its actual destination as a `link` line instead: nothing follows it, it is
+informational only. Filenames printed here can be passed verbatim to `course download
+--file`.
 
 ### `moodle course download`
 
@@ -189,12 +228,19 @@ claude mcp add moodle -- uv run --project /path/to/moodle-cli moodle-mcp
 | --- | --- |
 | `list_courses` | `view` (enum, default `all`), `sort` (enum, default `name`) |
 | `get_course_contents` | `course` |
+| `search_courses` | `query` |
 | `download_course_files` | `course`, `output_dir`, `sections[]`, `module_types[]`, `files[]`, `match[]`, `dry_run` |
 | `list_participants` | `course`, `role`, `include_emails` (default `false`) |
 
 `download_course_files` writes to disk and returns a manifest of paths, sizes and per-file
 status. It never returns file contents: a single course can hold hundreds of megabytes, and
 the agent can read whatever it needs from disk afterwards. Emails are opt-in here too.
+
+`get_course_contents` includes a `links` entry per module for `url`-type activities (a
+recorded-class or external-site link) — the destination is informational, not something
+any tool downloads. `search_courses` is `courses search`: one call over every enrolled
+course, each result naming what it matched under `match` and carrying the `section_number`
+that `download_course_files` selects by.
 
 ## Configuration
 
@@ -237,6 +283,10 @@ but differ in size are both kept, with the module id appended to the second.
 **Downloads are verified, not assumed.** Moodle answers some failed requests with HTTP 200
 and a JSON error body. Written to disk unchecked, that becomes a small JSON file wearing a
 `.pdf` name. Every download is checked against its declared size and content type.
+
+**A `url` module's link is not a file.** `course contents` and `search_courses` show its
+actual destination as a `link`, separate from `files`; nothing downloads it, since there is
+nothing to download.
 
 ## Development
 

@@ -30,6 +30,7 @@ from moodle_cli.downloads import (
 )
 from moodle_cli.errors import MoodleError
 from moodle_cli.models import Participant, Section
+from moodle_cli.search import SearchHit, search_contents
 
 console = Console()
 err_console = Console(stderr=True)
@@ -235,13 +236,61 @@ def _short_name(fullname: str, shortname: str) -> str:
     return fullname
 
 
+@courses_app.command("search")
+@handle_errors
+def courses_search(
+    query: Annotated[str, typer.Argument(help="Text to look for in names, case-insensitive.")],
+    as_json: JsonOpt = False,
+) -> None:
+    """Search section, activity, file and link names across every enrolled course.
+
+    A link matches on its destination as well as on its label, so a bare domain such as
+    github.com finds it. The match column names what was hit; when it is an activity name,
+    the files and links shown are the activity's whole contents rather than a filtered set.
+    """
+    with _client() as client:
+        results = search_contents(client, query)
+
+    if as_json:
+        _emit_json(results.as_payload())
+        return
+
+    if not results.hits:
+        console.print("[yellow]No matches.[/yellow]")
+        return
+
+    count = len(results.hits)
+    table = Table(title=f"{count} {_plural(count, 'result')} for {query!r}", expand=True)
+    table.add_column("course", no_wrap=True)
+    table.add_column("section", style="dim", no_wrap=True, overflow="ellipsis")
+    table.add_column("match", style="dim", no_wrap=True)
+    table.add_column("activity", ratio=1, min_width=16, no_wrap=True, overflow="ellipsis")
+    table.add_column("files and links", ratio=1, min_width=16, overflow="fold")
+    for hit in results.hits:
+        table.add_row(
+            hit.course,
+            f"{hit.section_number}. {hit.section}",
+            hit.kind.value,
+            hit.module or "-",
+            _hit_contents(hit),
+        )
+    console.print(table)
+    if results.truncated:
+        console.print("[yellow]More matches than shown; narrow the query.[/yellow]")
+
+
+def _hit_contents(hit: SearchHit) -> str:
+    names = [f.filename for f in hit.files] + [link.fileurl or "" for link in hit.links]
+    return "\n".join(names) or "-"
+
+
 # -- course ----------------------------------------------------------------------
 
 
 @course_app.command("contents")
 @handle_errors
 def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
-    """Show a course's sections, activities and downloadable files."""
+    """Show a course's sections, activities, downloadable files and external links."""
     with _client() as client:
         resolved = client.resolve_course(course)
         sections = client.get_course_contents(resolved.id)
@@ -253,7 +302,9 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
     console.print(f"[bold]{escape(resolved.shortname)}[/bold] — {escape(resolved.fullname)}\n")
     for section in sections:
         files = sum(len(m.files) for m in section.modules)
-        suffix = f"  [dim]({files} {_plural(files, 'file')})[/dim]" if files else ""
+        links = sum(len(m.links) for m in section.modules)
+        counts = [c for c in [_count(files, "file"), _count(links, "link")] if c]
+        suffix = f"  [dim]({', '.join(counts)})[/dim]" if counts else ""
         console.print(
             f"[bold cyan]{section.section:>2}. {escape(section.name)}[/bold cyan]{suffix}"
         )
@@ -264,7 +315,13 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
                 # Size leads so a long filename wrapping cannot orphan it on its own line.
                 size = _human_size(file.filesize).rjust(9)
                 console.print(f"       [dim]{size}[/dim]  {escape(file.filename)}")
+            for link in module.links:
+                console.print(f"       [dim]{'link':>9}[/dim]  {escape(link.fileurl or '')}")
         console.print()
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {_plural(n, noun)}" if n else ""
 
 
 @course_app.command("download")

@@ -85,6 +85,15 @@ class Module(_Base):
     def files(self) -> list[CourseFile]:
         return [c for c in self.contents if c.is_downloadable]
 
+    @property
+    def links(self) -> list[CourseFile]:
+        """External link entries, e.g. a ``url``-type module's actual target.
+
+        These carry no bytes to download, but the destination itself is real information
+        that ``files`` deliberately excludes.
+        """
+        return [c for c in self.contents if c.type == "url" and c.fileurl]
+
 
 class Section(_Base):
     id: int

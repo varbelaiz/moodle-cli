@@ -93,3 +93,15 @@ def test_downloading_a_real_file_matches_the_declared_size(
         return
 
     pytest.skip("no starred course exposes a small enough file to smoke-test")
+
+
+def test_course_contents_url_modules_expose_a_real_link(live_client: MoodleClient) -> None:
+    """At least one course must have a url module whose target is not the Moodle page itself."""
+    for course in live_client.list_courses(view="all"):
+        for section in live_client.get_course_contents(course.id):
+            for module in section.modules:
+                for link in module.links:
+                    assert link.fileurl
+                    assert link.fileurl != module.url
+                    return
+    pytest.skip("no enrolled course currently has a url module")
