@@ -33,6 +33,39 @@ way.
 **Assignments and quizzes are separate Moodle activity types**, read through entirely
 different web-service functions — see [quizzes](quizzes.md).
 
+Example `--json` response — the raw assignment fields:
+
+```json
+[
+  {
+    "id": 4021,
+    "cmid": 601,
+    "course": 101,
+    "name": "Problem Set 1",
+    "duedate": 1707868800,
+    "allowsubmissionsfromdate": 1706659200,
+    "cutoffdate": 0,
+    "grade": 100.0
+  }
+]
+```
+
+Example `get_assignments` response — the same assignment, curated: a computed `due_at`
+and `max_grade`/`scale_graded` in place of the raw signed `grade`:
+
+```json
+[
+  {
+    "id": 4021,
+    "course": "CS101",
+    "name": "Problem Set 1",
+    "due_at": "2024-02-14",
+    "max_grade": 100.0,
+    "scale_graded": false
+  }
+]
+```
+
 ## Show one assignment's status
 
 CLI: `moodle course assignment-status`
@@ -51,3 +84,30 @@ Shows submission status, grading status, submitted filenames, and an extension d
 one was granted. The MCP tool returns both `grade` (the raw value to compute with) and
 `grade_display` (how the campus renders it) — the latter is the only form that names a
 scale grade such as "Aprobado".
+
+Example `--json` response:
+
+```json
+{
+  "status": "submitted",
+  "gradingstatus": "graded",
+  "grade": "92.00",
+  "gradefordisplay": "92.00",
+  "extensionduedate": 0,
+  "submitted_files": ["problem_set_1.pdf"]
+}
+```
+
+Example `get_assignment_status` response — same submission, curated:
+
+```json
+{
+  "submitted": true,
+  "submission_status": "submitted",
+  "submitted_files": ["problem_set_1.pdf"],
+  "graded": true,
+  "grade": "92.00",
+  "grade_display": "92.00",
+  "extension_due_at": null
+}
+```
