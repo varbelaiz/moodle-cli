@@ -12,6 +12,7 @@ import respx
 from typer.testing import CliRunner
 
 from moodle_cli.cli import app
+from moodle_cli.models import epoch_to_datetime
 from tests.conftest import BASE_URL, REST_URL, route_by_function
 
 runner = CliRunner()
@@ -273,7 +274,7 @@ def test_api_error_is_reported_cleanly(courses_payload: dict[str, Any]) -> None:
     assert "invalidtoken" in result.output
 
 
-# -- links ---------------------------------------------------------------------------
+# -- links, announcements ---------------------------------------------------------
 
 
 @respx.mock
@@ -333,3 +334,69 @@ def test_courses_search_json_matches_the_mcp_payload(
     assert [r["match"] for r in data["results"]] == ["file"] * 3
     assert all(r["files"] == ["Cap 1.pdf"] for r in data["results"])
     assert all(r["section_number"] == 0 for r in data["results"])
+
+
+# -- announcements --------------------------------------------------------------------
+
+
+@respx.mock
+def test_announcements_strip_html_and_show_the_newest_first(
+    courses_payload: dict[str, Any],
+    forums_payload: list[dict[str, Any]],
+    discussions_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_forum_get_forums_by_courses=forums_payload,
+        mod_forum_get_forum_discussions=discussions_payload,
+    )
+
+    result = runner.invoke(app, ["course", "announcements", "IOS460"])
+
+    assert result.exit_code == 0
+    lines = result.output.splitlines()
+    assert lines[0] == "Cambio de aula para la clase del jueves (pinned)"
+    assert "<strong>" not in result.output
+    assert "S004" in result.output
+    assert "&iacute;" not in result.output
+    assert "  Traer la guía de ejercicios." in result.output
+
+
+@respx.mock
+def test_announcements_json_carries_plain_text_and_a_full_timestamp(
+    courses_payload: dict[str, Any],
+    forums_payload: list[dict[str, Any]],
+    discussions_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_forum_get_forums_by_courses=forums_payload,
+        mod_forum_get_forum_discussions=discussions_payload,
+    )
+
+    result = runner.invoke(app, ["course", "announcements", "IOS460", "--json"])
+
+    assert result.exit_code == 0
+    newest = json.loads(result.stdout)[0]
+    assert newest["course"] == "IOS460 - 123246"
+    assert "<p>" not in newest["message"]
+    assert newest["message"].startswith("Estimados,\n")
+    posted_at = epoch_to_datetime(1783108601)
+    assert posted_at is not None
+    assert newest["posted_at"] == posted_at.isoformat()
+
+
+@respx.mock
+def test_announcements_report_nothing_for_a_course_whose_forums_are_all_general(
+    courses_payload: dict[str, Any],
+    forums_payload: list[dict[str, Any]],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_forum_get_forums_by_courses=[f for f in forums_payload if f["type"] != "news"],
+    )
+
+    result = runner.invoke(app, ["course", "announcements", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "No announcements" in result.output
