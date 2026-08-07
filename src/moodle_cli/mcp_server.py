@@ -275,6 +275,44 @@ def list_participants(
     return people
 
 
+@mcp.tool()
+def get_course_announcements(course: str | None = None) -> list[dict[str, Any]]:
+    """List announcements from a course's news forum, newest first.
+
+    `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
+    course, dashboard-hidden ones included. Only a forum Moodle marks as "news" carries
+    announcements — a course's regular discussion forums are not included, and a course
+    without a news forum returns nothing. `message` is plain text; `posted_at` keeps the
+    time of day, which is what tells two posts of the same day apart.
+    """
+    client, _ = _open_client()
+    with client:
+        # The course list is fetched once and reused as both the sweep's scope and its
+        # id -> shortname map; letting get_announcements enumerate again would double the
+        # round trip on the default path.
+        courses = (
+            [client.resolve_course(course)]
+            if course
+            else client.list_courses(view="all-including-hidden")
+        )
+        names = {c.id: c.shortname for c in courses}
+        announcements = client.get_announcements([c.id for c in courses])
+
+    return [
+        {
+            "id": a.id,
+            "course": names.get(a.courseid, str(a.courseid)),
+            "subject": a.subject,
+            "message": a.message_text,
+            "author": a.userfullname,
+            "posted_at": a.posted_at.isoformat() if a.posted_at else None,
+            "replies": a.numreplies,
+            "pinned": a.pinned,
+        }
+        for a in announcements
+    ]
+
+
 def main() -> None:
     """Run the server over stdio."""
     # httpx logs every request at INFO, which buries real server diagnostics on stderr.

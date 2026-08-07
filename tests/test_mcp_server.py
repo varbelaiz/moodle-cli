@@ -7,15 +7,18 @@ test_search.py; these exercise the payload the tools hand to an agent.
 from __future__ import annotations
 
 import itertools
+import json
 from typing import Any
 
 import httpx
 import pytest
 import respx
+from typer.testing import CliRunner
 
+from moodle_cli.cli import app
 from moodle_cli.errors import MoodleAPIError
-from moodle_cli.mcp_server import search_courses
-from tests.conftest import REST_URL, route_by_function
+from moodle_cli.mcp_server import get_course_announcements, search_courses
+from tests.conftest import REST_URL, posted_params, route_by_function
 
 pytestmark = pytest.mark.usefixtures("configured_env")
 
@@ -126,3 +129,87 @@ def test_search_aborts_on_an_error_body_from_any_course_in_the_sweep(
 
     with pytest.raises(MoodleAPIError):
         search_courses("slack")
+
+
+# -- get_course_announcements -------------------------------------------------------
+
+
+@respx.mock
+def test_get_course_announcements_resolves_course_and_strips_html(
+    courses_payload: dict[str, Any],
+    forums_payload: list[dict[str, Any]],
+    discussions_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_forum_get_forums_by_courses=forums_payload,
+        mod_forum_get_forum_discussions=discussions_payload,
+    )
+
+    results = get_course_announcements("IOS460")
+
+    assert len(results) == 2
+    assert results[0]["course"] == "IOS460 - 123246"
+    assert results[0]["subject"] == "Cambio de aula para la clase del jueves"
+    assert "<p>" not in results[0]["message"]
+    assert "S004" in results[0]["message"]
+    assert results[0]["pinned"] is True
+
+
+@respx.mock
+def test_get_course_announcements_sweeps_every_course_with_one_course_lookup(
+    courses_payload: dict[str, Any],
+    forums_payload: list[dict[str, Any]],
+    discussions_payload: dict[str, Any],
+) -> None:
+    """The default sweep reaches dashboard-hidden courses and lists them only once."""
+    route = route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_forum_get_forums_by_courses=forums_payload,
+        mod_forum_get_forum_discussions=discussions_payload,
+    )
+
+    results = get_course_announcements()
+
+    functions = [posted_params(call.request)["wsfunction"] for call in route.calls]
+    assert functions.count("core_course_get_enrolled_courses_by_timeline_classification") == 1
+    assert posted_params(route.calls[0].request)["classification"] == "allincludinghidden"
+    assert posted_params(route.calls[1].request)["courseids[2]"] == "103"
+    assert {r["course"] for r in results} == {"IOS460 - 123246"}
+
+
+@respx.mock
+def test_get_course_announcements_names_a_post_by_course_id_when_the_course_is_unknown(
+    courses_payload: dict[str, Any],
+    discussions_payload: dict[str, Any],
+) -> None:
+    """A bare id beats dropping the post: the agent still knows two posts differ."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_forum_get_forums_by_courses=[{"id": 599, "course": 404, "type": "news"}],
+        mod_forum_get_forum_discussions=discussions_payload,
+    )
+
+    results = get_course_announcements()
+
+    assert {r["course"] for r in results} == {"404"}
+
+
+@respx.mock
+def test_get_course_announcements_matches_the_cli_json_field_for_field(
+    courses_payload: dict[str, Any],
+    forums_payload: list[dict[str, Any]],
+    discussions_payload: dict[str, Any],
+) -> None:
+    """One key, one meaning: `message` is plain text and `posted_at` local on both."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_forum_get_forums_by_courses=forums_payload,
+        mod_forum_get_forum_discussions=discussions_payload,
+    )
+
+    from_tool = get_course_announcements("IOS460")
+    result = CliRunner().invoke(app, ["course", "announcements", "IOS460", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == from_tool
