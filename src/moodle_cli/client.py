@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from collections.abc import Sequence
 from types import TracebackType
 from typing import Any
@@ -11,6 +12,8 @@ import httpx
 from moodle_cli.errors import MoodleAPIError, MoodleError
 from moodle_cli.models import (
     Announcement,
+    Assignment,
+    AssignmentStatus,
     Course,
     CourseGrade,
     Forum,
@@ -201,6 +204,48 @@ class MoodleClient:
 
         announcements.sort(key=lambda a: a.created, reverse=True)
         return announcements
+
+    def get_assignments(self, course_ids: list[int] | None = None) -> list[Assignment]:
+        """Assignments across courses; every enrolled course if ``course_ids`` is omitted."""
+        params: dict[str, Any] = {"courseids": course_ids} if course_ids else {}
+        body = self._call("mod_assign_get_assignments", **params)
+        return [
+            Assignment.model_validate(a)
+            for course in body.get("courses") or []
+            for a in course.get("assignments") or []
+        ]
+
+    def get_assignment_status(self, assignment_id: int) -> AssignmentStatus:
+        """Submission and grading status for one assignment.
+
+        ``assignment_id`` is the assignment's own ``id`` (from :meth:`get_assignments`),
+        not the course-module id: passing a cmid raises ``invalidrecordunknown``.
+        """
+        body = self._call("mod_assign_get_submission_status", assignid=assignment_id)
+        lastattempt = body.get("lastattempt") or {}
+        # A team assignment records the group's attempt under its own key; the shapes match.
+        submission = lastattempt.get("submission") or lastattempt.get("teamsubmission") or {}
+        feedback = body.get("feedback") or {}
+        grade = feedback.get("grade") or {}
+
+        files = [
+            file["filename"]
+            for plugin in submission.get("plugins") or []
+            if plugin.get("type") == "file"
+            for area in plugin.get("fileareas") or []
+            for file in area.get("files") or []
+        ]
+
+        # Every read below is `or default`, never `get(key, default)`: this campus sends an
+        # unset field as null, which a default cannot displace.
+        return AssignmentStatus(
+            status=submission.get("status"),
+            gradingstatus=lastattempt.get("gradingstatus") or "",
+            grade=grade.get("grade"),
+            gradefordisplay=html.unescape(feedback.get("gradefordisplay") or ""),
+            extensionduedate=lastattempt.get("extensionduedate") or 0,
+            submitted_files=files,
+        )
 
     def get_grade_overview(self) -> list[CourseGrade]:
         """Course-level grade summary across every enrolled course.

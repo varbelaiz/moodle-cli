@@ -1,0 +1,35 @@
+{
+  "lastattempt": {
+    "submission": {
+      "id": 769549,
+      "status": "submitted",
+      "plugins": [
+        {
+          "type": "file",
+          "name": "Archivos enviados",
+          "fileareas": [
+            {
+              "area": "submission_files",
+              "files": [
+                {
+                  "filename": "Entrega - Semana 1.pdf",
+                  "filesize": 36053,
+                  "fileurl": "https://campus.example.edu/webservice/pluginfile.php/1/assignsubmission_file/submission_files/1/Entrega.pdf"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "gradingstatus": "graded",
+    "extensionduedate": 0
+  },
+  "feedback": {
+    "grade": {
+      "grade": "90.00000"
+    },
+    "gradefordisplay": "90.00&nbsp;/&nbsp;100.00"
+  },
+  "warnings": []
+}

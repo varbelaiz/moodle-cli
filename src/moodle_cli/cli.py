@@ -609,6 +609,63 @@ def _announcement_payload(announcement: Announcement, course: str) -> dict[str, 
     }
 
 
+@course_app.command("assignments")
+@handle_errors
+def course_assignments(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """List a course's assignments and due dates.
+
+    For every course at once, use `courses assignments`.
+    """
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        assignments = client.get_assignments([resolved.id])
+
+    if as_json:
+        _emit_json([a.model_dump(mode="json") for a in assignments])
+        return
+
+    count = len(assignments)
+    table = Table(title=f"{count} {_plural(count, 'assignment')} in {escape(resolved.shortname)}")
+    table.add_column("id", justify="right", style="dim")
+    table.add_column("name")
+    table.add_column("due", justify="right", style="dim")
+    for a in assignments:
+        table.add_row(str(a.id), escape(a.name), _format_epoch(a.duedate))
+    console.print(table)
+
+
+AssignmentIdArg = Annotated[
+    int, typer.Argument(help="Assignment id, as shown by `course assignments`.")
+]
+
+
+@course_app.command("assignment-status")
+@handle_errors
+def course_assignment_status(assignment_id: AssignmentIdArg, as_json: JsonOpt = False) -> None:
+    """Show submission and grading status for one assignment.
+
+    `assignment_id` is the id from `course assignments` — not a course-module id, which
+    this call rejects.
+    """
+    with _client() as client:
+        status = client.get_assignment_status(assignment_id)
+
+    if as_json:
+        _emit_json(status.model_dump(mode="json"))
+        return
+
+    console.print(f"submitted: {'yes' if status.submitted else 'no'} ({status.status or '-'})")
+    console.print(f"graded: {'yes' if status.graded else 'no'}")
+    if status.gradefordisplay:
+        console.print(f"grade: {escape(status.gradefordisplay)}")
+    if status.submitted_files:
+        console.print("files:")
+        for name in status.submitted_files:
+            console.print(f"  {escape(name)}")
+    if status.extensionduedate:
+        console.print(f"extension until: {_format_epoch(status.extensionduedate)}")
+
+
 @course_app.command("grades")
 @handle_errors
 def course_grades(course: CourseArg, as_json: JsonOpt = False) -> None:

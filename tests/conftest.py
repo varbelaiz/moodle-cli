@@ -131,6 +131,18 @@ def discussions_payload() -> dict[str, Any]:
 
 
 @pytest.fixture
+def assignments_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("assignments.json")
+    return payload
+
+
+@pytest.fixture
+def submission_status_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("submission_status.json")
+    return payload
+
+
+@pytest.fixture
 def grades_overview_payload() -> dict[str, Any]:
     payload: dict[str, Any] = load_fixture("grades_overview.json")
     return payload

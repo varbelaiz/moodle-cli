@@ -18,6 +18,8 @@ from typer.testing import CliRunner
 from moodle_cli.cli import app
 from moodle_cli.errors import MoodleAPIError
 from moodle_cli.mcp_server import (
+    get_assignment_status,
+    get_assignments,
     get_course_announcements,
     get_grade_summary,
     get_grades,
@@ -221,6 +223,41 @@ def test_get_course_announcements_matches_the_cli_json_field_for_field(
 
 
 # -- assignments and grades ----------------------------------------------------------
+
+
+@respx.mock
+def test_get_assignments_resolves_course_and_labels_it(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    results = get_assignments("IOS460")
+
+    assert results[0] == {
+        "id": 40393,
+        "course": "IOS460 - 123246",
+        "name": "Actividad semana 1",
+        "due_at": "2026-03-11",
+    }
+
+
+@respx.mock
+def test_get_assignment_status_reports_submission_and_grade(
+    submission_status_payload: dict[str, Any],
+) -> None:
+    route_by_function(mod_assign_get_submission_status=submission_status_payload)
+
+    result = get_assignment_status(40393)
+
+    assert result["submitted"] is True
+    assert result["graded"] is True
+    # Both forms: the raw value to compute with, and the campus's own rendering of it.
+    assert result["grade"] == "90.00000"
+    assert result["grade_display"] == "90.00\xa0/\xa0100.00"
+    assert result["submitted_files"] == ["Entrega - Semana 1.pdf"]
 
 
 @respx.mock

@@ -274,7 +274,7 @@ def test_api_error_is_reported_cleanly(courses_payload: dict[str, Any]) -> None:
     assert "invalidtoken" in result.output
 
 
-# -- links, announcements ---------------------------------------------------------
+# -- links, announcements, assignments and grades ---------------------------------
 
 
 @respx.mock
@@ -400,6 +400,68 @@ def test_announcements_report_nothing_for_a_course_whose_forums_are_all_general(
 
     assert result.exit_code == 0
     assert "No announcements" in result.output
+
+
+@respx.mock
+def test_assignments_lists_due_dates(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    result = runner.invoke(app, ["course", "assignments", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "Actividad semana 1" in result.output
+    assert "40393" in result.output
+    assert "2026-03-11" in result.output
+
+
+@respx.mock
+def test_assignment_status_decodes_the_grade_and_lists_submitted_files(
+    submission_status_payload: dict[str, Any],
+) -> None:
+    route_by_function(mod_assign_get_submission_status=submission_status_payload)
+
+    result = runner.invoke(app, ["course", "assignment-status", "40393"])
+
+    assert result.exit_code == 0
+    assert "submitted: yes" in result.output
+    assert "graded: yes" in result.output
+    assert "90.00\xa0/\xa0100.00" in result.output  # &nbsp; decoded to U+00A0, not literal
+    assert "Entrega - Semana 1.pdf" in result.output
+
+
+@respx.mock
+def test_a_null_optional_field_fails_as_a_message_not_a_traceback(
+    submission_status_payload: dict[str, Any],
+) -> None:
+    """A null in an optional field must not reach the user as a validation traceback."""
+    submission_status_payload["lastattempt"].update(gradingstatus=None, extensionduedate=None)
+    submission_status_payload["feedback"]["gradefordisplay"] = None
+    route_by_function(mod_assign_get_submission_status=submission_status_payload)
+
+    result = runner.invoke(app, ["course", "assignment-status", "40393"])
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert "graded: no" in result.output
+
+
+@respx.mock
+def test_an_extension_date_reads_in_the_same_zone_as_every_other_date(
+    submission_status_payload: dict[str, Any],
+) -> None:
+    """2026-03-12 01:00Z is still the 11th locally, which is the day the campus shows."""
+    submission_status_payload["lastattempt"]["extensionduedate"] = 1773277200
+    route_by_function(mod_assign_get_submission_status=submission_status_payload)
+
+    result = runner.invoke(app, ["course", "assignment-status", "40393"])
+
+    assert result.exit_code == 0
+    assert "extension until: 2026-03-11" in result.output
 
 
 @respx.mock

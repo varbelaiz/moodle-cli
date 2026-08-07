@@ -324,6 +324,62 @@ def get_course_announcements(course: str | None = None) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
+def get_assignments(course: str | None = None) -> list[dict[str, Any]]:
+    """List assignments and their due dates.
+
+    `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
+    course. Pass an assignment's `id` from this list to get_assignment_status for
+    submission and grading detail.
+    """
+    client, _ = _open_client()
+    with client:
+        if course:
+            resolved = client.resolve_course(course)
+            course_names = {resolved.id: resolved.shortname}
+            assignments = client.get_assignments([resolved.id])
+        else:
+            course_names = _course_names(client)
+            assignments = client.get_assignments()
+
+    return [
+        {
+            "id": a.id,
+            "course": course_names.get(a.course, str(a.course)),
+            "name": a.name,
+            "due_at": a.due_at.date().isoformat() if a.due_at else None,
+        }
+        for a in assignments
+    ]
+
+
+@mcp.tool()
+def get_assignment_status(assignment_id: int) -> dict[str, Any]:
+    """Submission and grading status for one assignment.
+
+    `assignment_id` is the `id` from get_assignments — not a course-module id, which
+    this call rejects.
+
+    `grade` is the raw value to compute with; `grade_display` is how the campus renders it,
+    which is the only form that names a scale grade such as "Aprobado".
+    """
+    client, _ = _open_client()
+    with client:
+        status = client.get_assignment_status(assignment_id)
+
+    return {
+        "submitted": status.submitted,
+        "submission_status": status.status,
+        "submitted_files": status.submitted_files,
+        "graded": status.graded,
+        "grade": status.grade,
+        "grade_display": status.gradefordisplay,
+        "extension_due_at": (
+            status.extension_due_at.date().isoformat() if status.extension_due_at else None
+        ),
+    }
+
+
+@mcp.tool()
 def get_grade_summary() -> list[dict[str, Any]]:
     """Course-level grade summary across every enrolled course.
 

@@ -206,6 +206,59 @@ class Forum(_Base):
     name: str = ""
 
 
+class Assignment(_Base):
+    id: int
+    cmid: int = 0
+    course: int = 0
+    name: _Text = ""
+    duedate: _Epoch = 0
+    allowsubmissionsfromdate: _Epoch = 0
+    cutoffdate: _Epoch = 0
+    grade: _Number = 0
+
+    @property
+    def due_at(self) -> datetime | None:
+        return epoch_to_datetime(self.duedate)
+
+
+#: ``gradingstatus`` values meaning the student can see a grade.
+_GRADED_STATUSES = frozenset({"graded", "released"})
+
+
+class AssignmentStatus(_Base):
+    """Curated view of ``mod_assign_get_submission_status``.
+
+    The raw response nests submission data under plugin-specific shapes that vary with
+    which submission methods (file, online text, ...) the assignment enables. Rather than
+    model that whole tree, ``MoodleClient.get_assignment_status`` extracts the fields
+    below by hand.
+    """
+
+    status: str | None = None
+    gradingstatus: _Text = ""
+    grade: str | None = None
+    gradefordisplay: _Text = ""
+    extensionduedate: _Epoch = 0
+    submitted_files: list[str] = Field(default_factory=list)
+
+    @property
+    def submitted(self) -> bool:
+        return self.status == "submitted"
+
+    @property
+    def graded(self) -> bool:
+        """A course using a marking workflow says "released" where a plain one says "graded".
+
+        The other workflow states (in marking, ready for review, ...) are stages the
+        student cannot see a grade from, so they read as ungraded.
+        """
+        return self.gradingstatus in _GRADED_STATUSES
+
+    @property
+    def extension_due_at(self) -> datetime | None:
+        return epoch_to_datetime(self.extensionduedate)
+
+
 class CourseGrade(_Base):
     courseid: int
     grade: _Text = ""

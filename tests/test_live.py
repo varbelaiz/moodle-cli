@@ -123,6 +123,22 @@ def test_get_announcements_reads_a_real_news_forum(live_client: MoodleClient) ->
     pytest.skip("no enrolled course currently has announcements")
 
 
+def test_every_assignment_status_parses(live_client: MoodleClient) -> None:
+    """Which optional fields arrive null varies per assignment, so one is not a sample.
+
+    Sweeping every assignment is what catches a field the campus leaves null on a
+    minority of them; a single round trip passes right through that.
+    """
+    assignments = live_client.get_assignments()
+    if not assignments:
+        pytest.skip("no enrolled course currently has an assignment")
+
+    for assignment in assignments:
+        status = live_client.get_assignment_status(assignment.id)
+        assert isinstance(status.submitted, bool)
+        assert isinstance(status.graded, bool)
+
+
 def test_get_grade_overview_always_succeeds(live_client: MoodleClient) -> None:
     """Unlike get_grade_items, this must never raise nopermissiontoviewgrades."""
     live_client.get_grade_overview()

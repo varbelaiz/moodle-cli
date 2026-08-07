@@ -269,6 +269,95 @@ def test_get_announcements_raises_on_a_warning_beside_the_discussions(
     assert "errorreadingforum" in str(exc.value)
 
 
+# -- assignments -------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_assignments_flattens_courses(
+    client: MoodleClient, assignments_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=assignments_payload))
+
+    assignments = client.get_assignments()
+
+    assert [a.name for a in assignments] == ["Actividad semana 1", "Trabajo Práctico 1"]
+    assert all(a.course == 101 for a in assignments)
+
+
+@respx.mock
+def test_get_assignment_status_extracts_submission_and_grade(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    status = client.get_assignment_status(40393)
+
+    assert status.submitted is True
+    assert status.graded is True
+    assert status.grade == "90.00000"
+    # &nbsp; arrives HTML-escaped and is decoded, not left literal.
+    assert status.gradefordisplay == "90.00\xa0/\xa0100.00"
+    assert status.submitted_files == ["Entrega - Semana 1.pdf"]
+
+
+@respx.mock
+def test_a_null_optional_field_in_a_status_payload_does_not_crash(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    """The campus sends null for an unset optional field instead of omitting it."""
+    submission_status_payload["lastattempt"].update(
+        gradingstatus=None, extensionduedate=None, submission=None
+    )
+    submission_status_payload["feedback"].update(gradefordisplay=None, grade=None)
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    status = client.get_assignment_status(40393)
+
+    assert status.submitted is False
+    assert status.graded is False
+    assert status.grade is None
+    assert status.gradefordisplay == ""
+    assert status.extension_due_at is None
+    assert status.submitted_files == []
+
+
+@respx.mock
+def test_a_released_grade_under_a_marking_workflow_counts_as_graded(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    """Marking workflow replaces graded/notgraded with its own states; only one is visible."""
+    submission_status_payload["lastattempt"]["gradingstatus"] = "released"
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    assert client.get_assignment_status(40393).graded is True
+
+
+@respx.mock
+def test_an_unreleased_grade_under_a_marking_workflow_counts_as_ungraded(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    submission_status_payload["lastattempt"]["gradingstatus"] = "inmarking"
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    assert client.get_assignment_status(40393).graded is False
+
+
+@respx.mock
+def test_a_group_submission_is_read_from_the_team_record(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    """A team assignment files the attempt under teamsubmission and leaves submission unset."""
+    lastattempt = submission_status_payload["lastattempt"]
+    lastattempt["teamsubmission"] = lastattempt.pop("submission")
+    lastattempt["submission"] = None
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    status = client.get_assignment_status(40393)
+
+    assert status.submitted is True
+    assert status.submitted_files == ["Entrega - Semana 1.pdf"]
+
+
 # -- grades ----------------------------------------------------------------------
 
 
