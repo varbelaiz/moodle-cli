@@ -15,6 +15,10 @@ Lists a course's quizzes and their open/close windows, attempt limit and max gra
 `attempts` (CLI) / `attempt_limit` (MCP) is unlimited when the quiz sets no cap — shown as
 `unlimited` on the CLI and `null` over MCP.
 
+Over MCP, `opens_at` and `closes_at` are full timestamps carrying their offset; the CLI
+table prints the date alone, which is the right granularity to scan and the wrong one to
+compute a deadline from. See [Deadlines are moments](../README.md#things-worth-knowing).
+
 The `id` column/field feeds into quiz status below.
 
 Example `--json` response — the raw quiz fields:
@@ -42,8 +46,8 @@ and `attempt_limit` in place of the raw `attempts`:
     "id": 3305,
     "course": "CS101",
     "name": "Quiz 1: Variables and Loops",
-    "opens_at": "2024-02-14",
-    "closes_at": "2024-02-21",
+    "opens_at": "2024-02-14T00:00:00-03:00",
+    "closes_at": "2024-02-21T23:59:00-03:00",
     "attempt_limit": 2,
     "max_grade": 10.0
   }
@@ -56,12 +60,17 @@ CLI: `moodle course quiz-status`
 MCP: `get_quiz_status`
 
 ```
-moodle course quiz-status QUIZ_ID
+moodle course quiz-status QUIZ_ID [--course COURSE]
 ```
 
-MCP parameter: `quiz_id`.
+MCP parameters: `quiz_id`; `course`, optional.
 
 `QUIZ_ID`/`quiz_id` is the id from the listing above, not a course-module id.
+
+Pass the course whenever you know it. Reading the maximum a quiz grades out of means
+finding the quiz, and a quiz id alone does not say which course holds it, so without the
+hint every enrolled course's quizzes are fetched to locate one. Checking a course's
+quizzes one at a time is the ordinary case, and it pulls the whole campus once per quiz.
 
 Shows attempt count and best grade for one quiz. The grade is scaled to the quiz maximum,
 which is why it's always printed alongside it. When no grade can be read, the response
