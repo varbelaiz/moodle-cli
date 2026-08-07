@@ -130,13 +130,17 @@ def configured_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def route_by_function(**payloads: Any) -> respx.Route:
-    """Dispatch the single REST endpoint on the wsfunction being requested."""
+    """Dispatch the single REST endpoint on the wsfunction being requested.
+
+    A payload may be a callable taking the encoded request body, for a function whose
+    answer depends on the parameters it was called with.
+    """
 
     def responder(request: httpx.Request) -> httpx.Response:
         body = request.content.decode()
         for function, payload in payloads.items():
             if f"wsfunction={function}" in body:
-                return httpx.Response(200, json=payload)
+                return httpx.Response(200, json=payload(body) if callable(payload) else payload)
         return httpx.Response(200, json={"errorcode": "unmocked", "message": body})
 
     return respx.post(REST_URL).mock(side_effect=responder)
