@@ -35,6 +35,7 @@ from moodle_cli.models import (
     Section,
     epoch_to_datetime,
 )
+from moodle_cli.plugins import mount_commands
 from moodle_cli.search import SearchHit, search_contents
 from moodle_cli.session import open_client
 
@@ -55,6 +56,11 @@ course_app = typer.Typer(help="Work with a single course.", no_args_is_help=True
 app.add_typer(auth_app, name="auth")
 app.add_typer(courses_app, name="courses")
 app.add_typer(course_app, name="course")
+
+# Mounted at import rather than in main(), because the tests and any other embedder import
+# `app` directly; wiring only the entry point would give the plugin surface to a shell and
+# to nothing else that drives this app. Core groups are added first so they own their names.
+mount_commands(app)
 
 
 class View(StrEnum):
