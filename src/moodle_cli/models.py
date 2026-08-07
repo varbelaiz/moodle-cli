@@ -220,6 +220,21 @@ class Assignment(_Base):
     def due_at(self) -> datetime | None:
         return epoch_to_datetime(self.duedate)
 
+    @property
+    def scale_graded(self) -> bool:
+        """A negative ``grade`` is a scale id, not a maximum: -52 means "graded by scale 52".
+
+        The scale's name is not in this payload, so a caller can say the assignment is
+        scale-graded but not which scale; ``get_assignment_status`` resolves the awarded
+        value through ``gradefordisplay``.
+        """
+        return self.grade < 0
+
+    @property
+    def max_grade(self) -> float | None:
+        """Point maximum, or None when the assignment is scale-graded or ungraded."""
+        return self.grade if self.grade > 0 else None
+
 
 #: ``gradingstatus`` values meaning the student can see a grade.
 _GRADED_STATUSES = frozenset({"graded", "released"})

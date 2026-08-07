@@ -330,6 +330,10 @@ def get_assignments(course: str | None = None) -> list[dict[str, Any]]:
     `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
     course. Pass an assignment's `id` from this list to get_assignment_status for
     submission and grading detail.
+
+    `max_grade` is null when `scale_graded` is true: the assignment is marked with a named
+    scale rather than out of a number of points, and this endpoint does not name the scale.
+    It is also null for an assignment that carries no grade at all.
     """
     client, _ = _open_client()
     with client:
@@ -347,6 +351,8 @@ def get_assignments(course: str | None = None) -> list[dict[str, Any]]:
             "course": course_names.get(a.course, str(a.course)),
             "name": a.name,
             "due_at": a.due_at.date().isoformat() if a.due_at else None,
+            "max_grade": a.max_grade,
+            "scale_graded": a.scale_graded,
         }
         for a in assignments
     ]

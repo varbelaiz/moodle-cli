@@ -241,7 +241,26 @@ def test_get_assignments_resolves_course_and_labels_it(
         "course": "IOS460 - 123246",
         "name": "Actividad semana 1",
         "due_at": "2026-03-11",
+        "max_grade": 100,
+        "scale_graded": False,
     }
+
+
+@respx.mock
+def test_a_scale_graded_assignment_reports_no_maximum(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    """A negative grade names a scale, so there is no maximum to report."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    scale = get_assignments("IOS460")[1]
+
+    assert scale["name"] == "Trabajo Práctico 1"
+    assert scale["max_grade"] is None
+    assert scale["scale_graded"] is True
 
 
 @respx.mock

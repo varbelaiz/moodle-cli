@@ -29,7 +29,13 @@ from moodle_cli.downloads import (
     sanitize,
 )
 from moodle_cli.errors import MoodleError
-from moodle_cli.models import Announcement, Participant, Section, epoch_to_datetime
+from moodle_cli.models import (
+    Announcement,
+    Assignment,
+    Participant,
+    Section,
+    epoch_to_datetime,
+)
 from moodle_cli.search import SearchHit, search_contents
 
 console = Console()
@@ -629,9 +635,22 @@ def course_assignments(course: CourseArg, as_json: JsonOpt = False) -> None:
     table.add_column("id", justify="right", style="dim")
     table.add_column("name")
     table.add_column("due", justify="right", style="dim")
+    table.add_column("grade", justify="right", style="dim")
     for a in assignments:
-        table.add_row(str(a.id), escape(a.name), _format_epoch(a.duedate))
+        table.add_row(str(a.id), escape(a.name), _format_epoch(a.duedate), _grade_cell(a))
     console.print(table)
+
+
+def _grade_cell(assignment: Assignment) -> str:
+    """The grade column holds a point maximum, and a scale-graded assignment has none.
+
+    Moodle encodes "graded by scale N" as a negative ``grade``; printed as a number it
+    reads as a maximum of -N. The scale's name is not in this payload, so the column can
+    only say which kind of grading applies.
+    """
+    if assignment.scale_graded:
+        return "scale"
+    return f"{assignment.max_grade:g}" if assignment.max_grade else "-"
 
 
 AssignmentIdArg = Annotated[

@@ -420,6 +420,23 @@ def test_assignments_lists_due_dates(
 
 
 @respx.mock
+def test_a_scale_graded_assignment_shows_no_numeric_maximum(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    """A negative grade names a scale; printed as a number it reads as a maximum of -52."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    result = runner.invoke(app, ["course", "assignments", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "-52" not in result.output
+    assert "scale" in result.output
+
+
+@respx.mock
 def test_assignment_status_decodes_the_grade_and_lists_submitted_files(
     submission_status_payload: dict[str, Any],
 ) -> None:

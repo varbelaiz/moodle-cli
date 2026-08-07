@@ -285,6 +285,21 @@ def test_get_assignments_flattens_courses(
 
 
 @respx.mock
+def test_a_negative_grade_is_a_scale_id_and_not_a_maximum(
+    client: MoodleClient, assignments_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=assignments_payload))
+
+    points, scale = client.get_assignments()
+
+    assert points.scale_graded is False
+    assert points.max_grade == 100
+    assert scale.grade == -52  # the scale's id, as the campus sends it
+    assert scale.scale_graded is True
+    assert scale.max_grade is None
+
+
+@respx.mock
 def test_get_assignment_status_extracts_submission_and_grade(
     client: MoodleClient, submission_status_payload: dict[str, Any]
 ) -> None:
