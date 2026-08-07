@@ -6,7 +6,9 @@ ignores unknown keys rather than tracking the full upstream schema.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
+from html import unescape
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +20,25 @@ class _Base(BaseModel):
 def _epoch_to_datetime(value: int) -> datetime | None:
     """Moodle uses 0, not null, for unset timestamps."""
     return datetime.fromtimestamp(value, tz=UTC) if value else None
+
+
+#: Tags that end a line of prose. Everything else is stripped without a separator.
+_BLOCK_TAG = re.compile(
+    r"</?(?:br|p|div|li|ul|ol|tr|table|h[1-6]|blockquote)\b[^>]*>", re.IGNORECASE
+)
+_ANY_TAG = re.compile(r"<[^>]+>")
+
+
+def html_to_text(markup: str) -> str:
+    """Plain text from a Moodle HTML fragment, one line per block element.
+
+    Moodle stores authored prose as HTML. Dropping tags without putting a separator in
+    their place runs the last word of a block into the first word of the next, and an
+    entity left encoded reaches the reader as ``&nbsp;``.
+    """
+    stripped = _ANY_TAG.sub("", _BLOCK_TAG.sub("\n", markup))
+    lines = (" ".join(line.split()) for line in unescape(stripped).split("\n"))
+    return "\n".join(line for line in lines if line)
 
 
 class Course(_Base):
