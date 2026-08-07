@@ -29,6 +29,7 @@ from moodle_cli.downloads import (
     sanitize,
 )
 from moodle_cli.errors import MoodleError
+from moodle_cli.search import search_contents
 
 View = Literal["all", "all-including-hidden", "in-progress", "future", "past", "starred", "hidden"]
 Sort = Literal["name", "last-accessed"]
@@ -110,6 +111,27 @@ def get_course_contents(course: str) -> dict[str, Any]:
             for section in sections
         ],
     }
+
+
+@mcp.tool()
+def search_courses(query: str) -> dict[str, Any]:
+    """Search section, activity, file and link names across every enrolled course.
+
+    Case-insensitive substring match on names and on link destinations — it does not read
+    file contents. One call here replaces one get_course_contents call per course, which
+    matters when the question is "which course has X" rather than "what's in course X".
+
+    Every record names what the query hit under `match`: "section", "module", "file" or
+    "link". A "section" record carries no module fields. On a "module" hit, `files` and
+    `links` are the activity's complete contents; on a "file" or "link" hit they hold only
+    the entries that matched, so an empty list never means "this activity is empty".
+    `section_number` feeds download_course_files' `sections` selector directly.
+
+    `truncated` is true when more matched than the response carries: narrow the query.
+    """
+    client, _ = _open_client()
+    with client:
+        return search_contents(client, query).as_payload()
 
 
 @mcp.tool()

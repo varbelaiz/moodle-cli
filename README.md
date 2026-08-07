@@ -228,6 +228,7 @@ claude mcp add moodle -- uv run --project /path/to/moodle-cli moodle-mcp
 | --- | --- |
 | `list_courses` | `view` (enum, default `all`), `sort` (enum, default `name`) |
 | `get_course_contents` | `course` |
+| `search_courses` | `query` |
 | `download_course_files` | `course`, `output_dir`, `sections[]`, `module_types[]`, `files[]`, `match[]`, `dry_run` |
 | `list_participants` | `course`, `role`, `include_emails` (default `false`) |
 
@@ -237,7 +238,9 @@ the agent can read whatever it needs from disk afterwards. Emails are opt-in her
 
 `get_course_contents` includes a `links` entry per module for `url`-type activities (a
 recorded-class or external-site link) — the destination is informational, not something
-any tool downloads.
+any tool downloads. `search_courses` is `courses search`: one call over every enrolled
+course, each result naming what it matched under `match` and carrying the `section_number`
+that `download_course_files` selects by.
 
 ## Configuration
 
