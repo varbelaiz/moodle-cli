@@ -373,6 +373,80 @@ def test_a_group_submission_is_read_from_the_team_record(
     assert status.submitted_files == ["Entrega - Semana 1.pdf"]
 
 
+# -- quizzes ---------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_quizzes_sends_no_courseids_when_none_are_given(
+    client: MoodleClient, quizzes_payload: dict[str, Any]
+) -> None:
+    """Omitting courseids is what reaches enrolments the dashboard hides."""
+    route = respx.post(REST_URL).mock(return_value=httpx.Response(200, json=quizzes_payload))
+
+    quizzes = client.get_quizzes()
+
+    assert len(quizzes) == 1
+    assert quizzes[0].name == "Actividad semana 2"
+    assert quizzes[0].course == 101
+    assert len(route.calls) == 1
+    params = posted_params(route.calls[0].request)
+    assert not [k for k in params if k.startswith("courseids[")]
+
+
+@respx.mock
+def test_get_quiz_status_combines_attempts_and_best_grade(
+    client: MoodleClient,
+    quiz_attempts_payload: dict[str, Any],
+    quiz_best_grade_payload: dict[str, Any],
+) -> None:
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=quiz_attempts_payload),
+            httpx.Response(200, json=quiz_best_grade_payload),
+        ]
+    )
+
+    status = client.get_quiz_status(42628)
+
+    assert status.attempt_count == 1
+    assert status.last_state == "finished"
+    assert status.has_grade is True
+    assert status.grade == 6.925
+    assert status.grade_to_pass == 4
+
+
+@respx.mock
+def test_get_quiz_status_tolerates_an_attempt_without_a_state(client: MoodleClient) -> None:
+    """Every member of an attempt is optional, so a missing one must not raise."""
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"attempts": [{"id": 883899}], "warnings": []}),
+            httpx.Response(200, json={"hasgrade": False, "warnings": []}),
+        ]
+    )
+
+    status = client.get_quiz_status(42628)
+
+    assert status.attempt_count == 1
+    assert status.last_state is None
+
+
+@respx.mock
+def test_get_quiz_status_handles_no_attempts_yet(client: MoodleClient) -> None:
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"attempts": [], "warnings": []}),
+            httpx.Response(200, json={"hasgrade": False, "gradetopass": 60, "warnings": []}),
+        ]
+    )
+
+    status = client.get_quiz_status(42628)
+
+    assert status.attempt_count == 0
+    assert status.last_state is None
+    assert status.has_grade is False
+
+
 # -- grades ----------------------------------------------------------------------
 
 

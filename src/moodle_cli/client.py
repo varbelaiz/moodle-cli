@@ -19,6 +19,8 @@ from moodle_cli.models import (
     Forum,
     GradeItem,
     Participant,
+    Quiz,
+    QuizStatus,
     Section,
     SiteInfo,
 )
@@ -245,6 +247,39 @@ class MoodleClient:
             gradefordisplay=html.unescape(feedback.get("gradefordisplay") or ""),
             extensionduedate=lastattempt.get("extensionduedate") or 0,
             submitted_files=files,
+        )
+
+    def get_quizzes(self, course_ids: list[int] | None = None) -> list[Quiz]:
+        """Quizzes across courses; every enrolment if ``course_ids`` is omitted.
+
+        Omitting ``courseids`` lets Moodle fall back to the full enrolment list, which
+        includes courses the dashboard hides; listing courses here would not.
+        """
+        params: dict[str, Any] = {"courseids": course_ids} if course_ids else {}
+        body = self._call("mod_quiz_get_quizzes_by_courses", **params)
+        return [Quiz.model_validate(q) for q in body.get("quizzes", [])]
+
+    def get_quiz_status(self, quiz_id: int) -> QuizStatus:
+        """Attempt history and best grade for one quiz.
+
+        Two sources, because neither alone answers "did I take this and how did it go":
+        ``mod_quiz_get_user_attempts`` carries no grade and
+        ``mod_quiz_get_user_best_grade`` carries no attempt history.
+        """
+        attempts_body = self._call(
+            "mod_quiz_get_user_attempts", quizid=quiz_id, status="all", includepreviews=0
+        )
+        # Moodle orders attempts ascending, so the last entry is the most recent one.
+        attempts = attempts_body.get("attempts", [])
+        grade_body = self._call("mod_quiz_get_user_best_grade", quizid=quiz_id)
+        has_grade = grade_body.get("hasgrade", False)
+
+        return QuizStatus(
+            attempt_count=len(attempts),
+            last_state=attempts[-1].get("state") if attempts else None,
+            has_grade=has_grade,
+            grade=grade_body.get("grade"),
+            grade_to_pass=grade_body.get("gradetopass"),
         )
 
     def get_grade_overview(self) -> list[CourseGrade]:
