@@ -28,6 +28,7 @@ from moodle_cli.downloads import (
 )
 from moodle_cli.errors import MoodleError
 from moodle_cli.models import Module, html_to_text
+from moodle_cli.plugins import register_tools
 from moodle_cli.search import search_contents
 from moodle_cli.session import open_client
 
@@ -518,6 +519,12 @@ def get_grades(course: str) -> list[dict[str, Any]]:
         }
         for item in items
     ]
+
+
+# After every core tool, so the core has already claimed its names: FastMCP keeps the first
+# registration of a name and only warns about a second. At import rather than in main(),
+# because the tests import the tool functions directly and never call main().
+register_tools(mcp)
 
 
 def main() -> None:

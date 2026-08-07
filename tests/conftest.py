@@ -18,6 +18,8 @@ import httpx
 import pytest
 import respx
 
+from moodle_cli import plugins
+
 FIXTURES = Path(__file__).parent / "fixtures"
 BASE_URL = "https://campus.example.edu"
 REST_URL = f"{BASE_URL}/webservice/rest/server.php"
@@ -63,6 +65,22 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
     monkeypatch.setattr("moodle_cli.config._ENV_LOADED", False)
     for var in ("MOODLE_URL", "MOODLE_USER", "MOODLE_PASS", "MOODLE_TOKEN"):
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_plugins(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep whatever plugins the developer has installed out of the suite.
+
+    Without this, `moodle --help` and the MCP tool list differ between a maintainer's
+    machine and CI. Autouse and opt-out rather than opt-in, because a test that forgets to
+    ask for isolation is exactly the one that passes here and fails there. The cache is
+    cleared on both sides so a discovery surviving a test cannot make the suite
+    order-dependent.
+    """
+    monkeypatch.setenv(plugins.DISABLE_ENV, "1")
+    plugins.reset()
+    yield
+    plugins.reset()
 
 
 @pytest.fixture(autouse=True)
