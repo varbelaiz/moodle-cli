@@ -40,14 +40,15 @@ description: the summary lives in that package's own metadata, which is not here
 Example output:
 
 ```
-                                   3 plugins
-┏━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
-┃ name    ┃ source      ┃ status    ┃ version ┃ adds                   ┃ description     ┃
-┡━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ anydoc  │ official    │ installed │   0.1.0 │ anydoc, anydoc_convert │ Convert docs.   │
-│ panopto │ official    │ available │       - │ -                      │ -               │
-│ demo    │ third-party │ installed │   0.1.0 │ demo                   │ A local plugin. │
-└─────────┴─────────────┴───────────┴─────────┴────────────────────────┴─────────────────┘
+                                            3 plugins
+┏━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ name    ┃ source      ┃ status    ┃ version ┃ adds                                       ┃ description     ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ anydoc  │ official    │ installed │   0.1.0 │ anydoc, anydoc_convert_to_markdown,       │ Convert docs.   │
+│         │             │           │         │ anydoc_get_markdown                       │                 │
+│ panopto │ official    │ available │       - │ -                                          │ -               │
+│ demo    │ third-party │ installed │   0.1.0 │ demo                                       │ A local plugin. │
+└─────────┴─────────────┴───────────┴─────────┴────────────────────────────────────────────┴─────────────────┘
 Install one with `moodle plugins install NAME`.
 ```
 
@@ -61,9 +62,9 @@ Example `--json` response:
     "official": true,
     "status": "installed",
     "version": "0.1.0",
-    "summary": "Convert documents.",
+    "summary": "Convert course documents to markdown.",
     "command_group": "anydoc",
-    "mcp_tools": ["anydoc_convert"],
+    "mcp_tools": ["anydoc_convert_to_markdown", "anydoc_get_markdown"],
     "problem": null
   }
 ]
