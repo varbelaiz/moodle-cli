@@ -130,6 +130,16 @@ class MoodleClient:
         check_api_error(body, function=function)
         return body
 
+    def call(self, function: str, **params: Any) -> Any:
+        """Invoke any web-service function and return its parsed body.
+
+        The escape hatch for a function this class does not wrap, which is what a plugin
+        reaching a part of the campus the core does not cover needs. It goes through the
+        same error check as every wrapped call, because the campus signals failure with
+        HTTP 200 and a body: a plugin must not be able to opt out of that.
+        """
+        return self._call(function, **params)
+
     # -- endpoints ---------------------------------------------------------------
 
     def get_site_info(self) -> SiteInfo:
