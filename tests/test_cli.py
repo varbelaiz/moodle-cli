@@ -499,6 +499,125 @@ def test_an_extension_date_reads_in_the_same_zone_as_every_other_date(
 
 
 @respx.mock
+def test_quizzes_lists_close_dates_and_attempt_limits(
+    courses_payload: dict[str, Any], quizzes_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_quiz_get_quizzes_by_courses=quizzes_payload,
+    )
+
+    result = runner.invoke(app, ["course", "quizzes", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "Actividad semana 2" in result.output
+    assert "42628" in result.output
+    assert "2026-03-19" in result.output
+    assert "10.0" in result.output
+
+
+@respx.mock
+def test_quizzes_render_a_zero_attempt_limit_as_unlimited(
+    courses_payload: dict[str, Any], quizzes_payload: dict[str, Any]
+) -> None:
+    quizzes_payload["quizzes"][0]["attempts"] = 0
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_quiz_get_quizzes_by_courses=quizzes_payload,
+    )
+
+    result = runner.invoke(app, ["course", "quizzes", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "unlimited" in result.output
+
+
+@respx.mock
+def test_quiz_status_reports_attempts_and_grade(
+    quiz_attempts_payload: dict[str, Any],
+    quiz_best_grade_payload: dict[str, Any],
+    quizzes_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_attempts_payload,
+        mod_quiz_get_user_best_grade=quiz_best_grade_payload,
+        mod_quiz_get_quizzes_by_courses=quizzes_payload,
+    )
+
+    result = runner.invoke(app, ["course", "quiz-status", "42628"])
+
+    assert result.exit_code == 0
+    assert "attempts used: 1" in result.output
+    assert "last attempt: finished" in result.output
+    assert "grade: 6.925 / 10.0 (pass: 4.0)" in result.output
+
+
+@respx.mock
+def test_quiz_status_reports_no_attempts_before_the_quiz_is_taken() -> None:
+    route_by_function(
+        mod_quiz_get_user_attempts={"attempts": [], "warnings": []},
+        mod_quiz_get_user_best_grade={"hasgrade": False, "warnings": []},
+    )
+
+    result = runner.invoke(app, ["course", "quiz-status", "42628"])
+
+    assert result.exit_code == 0
+    assert "attempts used: 0" in result.output
+    assert "last attempt" not in result.output
+
+
+@respx.mock
+def test_quiz_status_reports_an_attempt_still_in_progress(
+    quiz_attempts_payload: dict[str, Any],
+) -> None:
+    """An unfinished attempt is a state an assignment's submitted/not binary cannot hold."""
+    quiz_attempts_payload["attempts"][0]["state"] = "inprogress"
+    quiz_attempts_payload["attempts"][0]["timefinish"] = 0
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_attempts_payload,
+        mod_quiz_get_user_best_grade={"hasgrade": False, "warnings": []},
+    )
+
+    result = runner.invoke(app, ["course", "quiz-status", "42628"])
+
+    assert result.exit_code == 0
+    assert "attempts used: 1" in result.output
+    assert "last attempt: inprogress" in result.output
+
+
+@respx.mock
+def test_quiz_status_reports_a_grade_as_unavailable_rather_than_ungraded(
+    quiz_attempts_payload: dict[str, Any],
+) -> None:
+    """A finished attempt with no readable grade may still be graded, only hidden."""
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_attempts_payload,
+        mod_quiz_get_user_best_grade={"hasgrade": False, "warnings": []},
+    )
+
+    result = runner.invoke(app, ["course", "quiz-status", "42628"])
+
+    assert result.exit_code == 0
+    assert "attempts used: 1" in result.output
+    assert "grade: not available" in result.output
+
+
+@respx.mock
+def test_quiz_status_omits_the_pass_mark_when_the_grade_is_unavailable() -> None:
+    """A pass mark alone tells the student nothing about how they did."""
+    route_by_function(
+        mod_quiz_get_user_attempts={"attempts": [], "warnings": []},
+        mod_quiz_get_user_best_grade={"hasgrade": False, "gradetopass": 60, "warnings": []},
+    )
+
+    result = runner.invoke(app, ["course", "quiz-status", "42628"])
+
+    assert result.exit_code == 0
+    assert "60" not in result.output
+    assert "pass" not in result.output
+
+
+@respx.mock
 def test_courses_grades_shows_the_summary_across_courses(
     courses_payload: dict[str, Any],
     grades_overview_payload: dict[str, Any],
