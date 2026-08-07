@@ -284,6 +284,10 @@ but differ in size are both kept, with the module id appended to the second.
 and a JSON error body. Written to disk unchecked, that becomes a small JSON file wearing a
 `.pdf` name. Every download is checked against its declared size and content type.
 
+**A `url` module's link is not a file.** `course contents` and `search_courses` show its
+actual destination as a `link`, separate from `files`; nothing downloads it, since there is
+nothing to download.
+
 ## Development
 
 ```bash
