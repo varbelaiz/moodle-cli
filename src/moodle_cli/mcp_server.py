@@ -59,7 +59,11 @@ def list_courses(view: View = "all", sort: Sort = "name") -> list[dict[str, Any]
 
     Note: this campus never sets course end dates, so the time-based views are not
     meaningful here. 'in-progress' returns every course and 'past'/'future' return none.
-    Use 'all' or 'starred', and read the start date to judge recency.
+    Use 'all' or 'starred', and read `starts_at` to judge recency.
+
+    `starts_at` is a full timestamp carrying its UTC offset, as every instant here is: a
+    bare date is read in whichever zone the tool runs in, which names the wrong day for
+    anyone reading from a different zone than the campus.
     """
     client, _ = _open_client()
     with client:
@@ -70,7 +74,7 @@ def list_courses(view: View = "all", sort: Sort = "name") -> list[dict[str, Any]
                 "fullname": c.fullname,
                 "category": c.category,
                 "starred": c.isfavourite,
-                "start_date": c.started_at.date().isoformat() if c.started_at else None,
+                "starts_at": c.started_at.isoformat() if c.started_at else None,
                 "url": c.viewurl,
             }
             for c in client.list_courses(view=view, sort=sort)
@@ -259,6 +263,10 @@ def list_participants(
     actually requires contacting someone; otherwise leave these out of context.
 
     `role` filters by role shortname, e.g. "student" or "editingteacher".
+
+    `last_course_access` is a full timestamp carrying its UTC offset, as every instant here
+    is: a bare date is read in whichever zone the tool runs in, so a late-evening access
+    reads as the next day to anyone east of the campus.
     """
     client, _ = _open_client()
     with client:
@@ -276,7 +284,7 @@ def list_participants(
             "fullname": person.fullname,
             "roles": person.role_names,
             "last_course_access": (
-                person.last_course_access.date().isoformat() if person.last_course_access else None
+                person.last_course_access.isoformat() if person.last_course_access else None
             ),
         }
         if include_emails:
@@ -334,6 +342,10 @@ def get_assignments(course: str | None = None) -> list[dict[str, Any]]:
     `max_grade` is null when `scale_graded` is true: the assignment is marked with a named
     scale rather than out of a number of points, and this endpoint does not name the scale.
     It is also null for an assignment that carries no grade at all.
+
+    `due_at` is a full timestamp carrying its UTC offset, because a deadline is a moment
+    and not a day: most fall at 23:59, where the date alone both hides how many hours are
+    left and names the wrong day for anyone reading from a different zone than the campus.
     """
     client, _ = _open_client()
     with client:
@@ -350,7 +362,7 @@ def get_assignments(course: str | None = None) -> list[dict[str, Any]]:
             "id": a.id,
             "course": course_names.get(a.course, str(a.course)),
             "name": a.name,
-            "due_at": a.due_at.date().isoformat() if a.due_at else None,
+            "due_at": a.due_at.isoformat() if a.due_at else None,
             "max_grade": a.max_grade,
             "scale_graded": a.scale_graded,
         }
@@ -367,6 +379,9 @@ def get_assignment_status(assignment_id: int) -> dict[str, Any]:
 
     `grade` is the raw value to compute with; `grade_display` is how the campus renders it,
     which is the only form that names a scale grade such as "Aprobado".
+
+    `extension_due_at` is a full timestamp carrying its UTC offset, for the same reason
+    `due_at` is one in get_assignments: an extension is a deadline, not a day.
     """
     client, _ = _open_client()
     with client:
@@ -380,7 +395,7 @@ def get_assignment_status(assignment_id: int) -> dict[str, Any]:
         "grade": status.grade,
         "grade_display": status.gradefordisplay,
         "extension_due_at": (
-            status.extension_due_at.date().isoformat() if status.extension_due_at else None
+            status.extension_due_at.isoformat() if status.extension_due_at else None
         ),
     }
 
@@ -391,7 +406,12 @@ def get_quizzes(course: str | None = None) -> list[dict[str, Any]]:
 
     `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
     course. Pass a quiz's `id` from this list to get_quiz_status for attempt and grade
-    detail. A null `attempt_limit` means the quiz can be attempted any number of times.
+    detail, along with the same `course`. A null `attempt_limit` means the quiz can be
+    attempted any number of times.
+
+    `opens_at` and `closes_at` are full timestamps carrying their UTC offset: a quiz window
+    closes at a moment, and the date alone both hides how many hours are left and names the
+    wrong day for anyone reading from a different zone than the campus.
     """
     client, _ = _open_client()
     with client:
@@ -408,8 +428,8 @@ def get_quizzes(course: str | None = None) -> list[dict[str, Any]]:
             "id": q.id,
             "course": course_names.get(q.course, str(q.course)),
             "name": q.name,
-            "opens_at": q.opens_at.date().isoformat() if q.opens_at else None,
-            "closes_at": q.closes_at.date().isoformat() if q.closes_at else None,
+            "opens_at": q.opens_at.isoformat() if q.opens_at else None,
+            "closes_at": q.closes_at.isoformat() if q.closes_at else None,
             # Moodle encodes "unlimited" as 0 attempts, which reads as "none allowed" to
             # anyone taking the number at face value.
             "attempt_limit": q.attempts or None,
@@ -420,16 +440,22 @@ def get_quizzes(course: str | None = None) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-def get_quiz_status(quiz_id: int) -> dict[str, Any]:
+def get_quiz_status(quiz_id: int, course: str | None = None) -> dict[str, Any]:
     """Attempt count and best grade for one quiz.
 
     `quiz_id` is the `id` from get_quizzes. `grade` and `grade_to_pass` are scaled to
     `max_grade`. A false `grade_available` means the grade cannot be read — the quiz may
     be unattempted, awaiting manual grading, or graded with the marks hidden.
+
+    Pass the `course` the quiz came from whenever it is known. Reading `max_grade` means
+    finding the quiz, and a quiz id alone does not say which course holds it, so without
+    this the lookup sweeps every enrolment: checking a course's quizzes one by one pulls
+    the whole campus once per quiz.
     """
     client, _ = _open_client()
     with client:
-        status = client.get_quiz_status(quiz_id)
+        course_id = client.resolve_course(course).id if course else None
+        status = client.get_quiz_status(quiz_id, course_id=course_id)
 
     return {
         "attempts_used": status.attempt_count,

@@ -24,6 +24,10 @@ moodle course assignments COURSE [--json]
 Both commands/the same tool share columns: id, name, due date, and grade (the point
 maximum an assignment is worth). The `id` feeds into assignment status below.
 
+Over MCP, `due_at` is a full timestamp carrying its offset; the CLI table prints the date
+alone, which is the right granularity to scan and the wrong one to compute a deadline
+from. See [Deadlines are moments](../README.md#things-worth-knowing).
+
 **Not every assignment is marked out of points.** Moodle also grades with named scales
 ("Aprobado", "Insuficiente"); that has no numeric maximum, so the listing reads `scale`
 (CLI) or reports `max_grade: null` with `scale_graded: true` (MCP) — the scale's name
@@ -59,7 +63,7 @@ and `max_grade`/`scale_graded` in place of the raw signed `grade`:
     "id": 4021,
     "course": "CS101",
     "name": "Problem Set 1",
-    "due_at": "2024-02-14",
+    "due_at": "2024-02-14T23:59:00-03:00",
     "max_grade": 100.0,
     "scale_graded": false
   }
@@ -83,7 +87,8 @@ id, which this call rejects.
 Shows submission status, grading status, submitted filenames, and an extension date if
 one was granted. The MCP tool returns both `grade` (the raw value to compute with) and
 `grade_display` (how the campus renders it) — the latter is the only form that names a
-scale grade such as "Aprobado".
+scale grade such as "Aprobado". `extension_due_at` is a full timestamp, for the same
+reason `due_at` is one: an extension is a deadline.
 
 Example `--json` response:
 

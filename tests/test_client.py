@@ -452,6 +452,54 @@ def test_get_quiz_status_handles_no_attempts_yet(client: MoodleClient) -> None:
     assert len(route.calls) == 2
 
 
+@respx.mock
+def test_get_quiz_status_narrows_the_grade_lookup_to_a_known_course(
+    client: MoodleClient,
+    quiz_attempts_payload: dict[str, Any],
+    quiz_best_grade_payload: dict[str, Any],
+    quizzes_payload: dict[str, Any],
+) -> None:
+    """A quiz id does not say which course holds it, so the lookup sweeps unless told.
+
+    Walking one course's quizzes is the case that hurts: without the hint, each quiz costs
+    a fetch of every quiz on the campus.
+    """
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=quiz_attempts_payload),
+            httpx.Response(200, json=quiz_best_grade_payload),
+            httpx.Response(200, json=quizzes_payload),
+        ]
+    )
+
+    status = client.get_quiz_status(42628, course_id=101)
+
+    assert status.max_grade == 10
+    assert posted_params(route.calls[2].request)["courseids[0]"] == "101"
+
+
+@respx.mock
+def test_get_quiz_status_sweeps_when_the_course_is_unknown(
+    client: MoodleClient,
+    quiz_attempts_payload: dict[str, Any],
+    quiz_best_grade_payload: dict[str, Any],
+    quizzes_payload: dict[str, Any],
+) -> None:
+    """No hint means no filter: the quiz has to be found somewhere."""
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=quiz_attempts_payload),
+            httpx.Response(200, json=quiz_best_grade_payload),
+            httpx.Response(200, json=quizzes_payload),
+        ]
+    )
+
+    client.get_quiz_status(42628)
+
+    params = posted_params(route.calls[2].request)
+    assert not [key for key in params if key.startswith("courseids[")]
+
+
 # -- grades ----------------------------------------------------------------------
 
 

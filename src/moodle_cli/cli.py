@@ -762,13 +762,23 @@ QuizIdArg = Annotated[int, typer.Argument(help="Quiz id, as shown by `course qui
 
 @course_app.command("quiz-status")
 @handle_errors
-def course_quiz_status(quiz_id: QuizIdArg, as_json: JsonOpt = False) -> None:
+def course_quiz_status(
+    quiz_id: QuizIdArg,
+    course: Annotated[
+        str | None,
+        typer.Option("--course", help="Course the quiz belongs to. Narrows the grade lookup."),
+    ] = None,
+    as_json: JsonOpt = False,
+) -> None:
     """Show attempt count and best grade for one quiz.
 
-    `quiz_id` is the id from `course quizzes`.
+    `quiz_id` is the id from `course quizzes`. Passing `--course` keeps the maximum-grade
+    lookup to that course; without it every enrolled course's quizzes are fetched, since a
+    quiz id alone does not say which course holds it.
     """
     with _client() as client:
-        status = client.get_quiz_status(quiz_id)
+        course_id = client.resolve_course(course).id if course else None
+        status = client.get_quiz_status(quiz_id, course_id=course_id)
 
     if as_json:
         _emit_json(status.model_dump(mode="json"))

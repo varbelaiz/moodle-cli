@@ -164,6 +164,13 @@ but differ in size are both kept, with the module id appended to the second.
 and a JSON error body. Written to disk unchecked, that becomes a small JSON file wearing a
 `.pdf` name. Every download is checked against its declared size and content type.
 
+**Deadlines are moments, not days.** Moodle stores an instant, and it is read in the zone
+of the machine running the tool. The default deadline is 23:59 campus time, so a bare date
+names the following day for anyone east of the campus: 23:59 in Buenos Aires is 03:59 the
+next morning in Rome. Every MCP timestamp therefore carries its offset, `due_at` and
+`closes_at` included. The CLI tables still print a date, which is the right granularity to
+read at a glance and the wrong one to compute a deadline from.
+
 See each docs page linked above for behavior specific to one command or tool.
 
 ## Development

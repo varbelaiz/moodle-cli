@@ -39,7 +39,7 @@ Example `--json` response with `--emails`:
 ```
 
 Example `list_participants` response with `include_emails: true` — roles flattened to
-shortnames, the access timestamp as a date:
+shortnames, the access timestamp as a full timestamp:
 
 ```json
 [
@@ -47,7 +47,7 @@ shortnames, the access timestamp as a date:
     "id": 55,
     "fullname": "Jane Doe",
     "roles": ["student"],
-    "last_course_access": "2024-06-10",
+    "last_course_access": "2024-06-10T14:32:00-03:00",
     "email": "jane.doe@example.edu"
   }
 ]

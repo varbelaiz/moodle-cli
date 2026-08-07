@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import itertools
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -25,11 +26,47 @@ from moodle_cli.mcp_server import (
     get_grades,
     get_quiz_status,
     get_quizzes,
+    list_courses,
+    list_participants,
     search_courses,
 )
 from tests.conftest import REST_URL, posted_params, route_by_function
 
 pytestmark = pytest.mark.usefixtures("configured_env")
+
+
+# -- timestamps --------------------------------------------------------------------
+
+
+@respx.mock
+def test_course_start_is_an_instant_not_a_day(courses_payload: dict[str, Any]) -> None:
+    """`starts_at` is named for what it holds, and holds enough to be unambiguous.
+
+    A bare date resolves in whichever zone the tool runs in, so it names a different day
+    either side of midnight; the offset is what settles it.
+    """
+    route_by_function(core_course_get_enrolled_courses_by_timeline_classification=courses_payload)
+
+    course = list_courses()[0]
+
+    assert "start_date" not in course, "renamed: a _date key holding a timestamp misleads"
+    assert datetime.fromisoformat(course["starts_at"]).utcoffset() is not None
+
+
+@respx.mock
+def test_last_access_keeps_the_time_of_day(
+    courses_payload: dict[str, Any], participants_payload: list[dict[str, Any]]
+) -> None:
+    """An evening access reads as the next day east of the campus once the time is gone."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_enrol_get_enrolled_users=participants_payload,
+    )
+
+    access = list_participants("IOS460")[0]["last_course_access"]
+
+    assert datetime.fromisoformat(access).utcoffset() is not None
+    assert len(access) > len("2026-07-26"), "the time of day has to survive"
 
 
 # -- search_courses ----------------------------------------------------------------
@@ -242,10 +279,39 @@ def test_get_assignments_resolves_course_and_labels_it(
         "id": 40393,
         "course": "IOS460 - 123246",
         "name": "Actividad semana 1",
-        "due_at": "2026-03-11",
+        # Asserted as an instant rather than a literal: the rendering carries the reader's
+        # own offset, so a literal would pass here and fail on a UTC CI runner.
+        "due_at": _local_iso(1773244800),
         "max_grade": 100,
         "scale_graded": False,
     }
+
+
+def _local_iso(epoch: int) -> str:
+    """The timestamp these tools emit, rendered in whatever zone the test host runs in."""
+    return datetime.fromtimestamp(epoch, tz=UTC).astimezone().isoformat()
+
+
+@respx.mock
+def test_a_deadline_keeps_its_time_of_day(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    """A due date truncated to a day loses the hours left, and lands on the wrong day.
+
+    Moodle's default deadline is 23:59 campus time. Reported as a bare date to a reader
+    east of the campus, that names the following day.
+    """
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    due_at = get_assignments("IOS460")[0]["due_at"]
+    moment = datetime.fromisoformat(due_at)
+
+    assert moment == datetime.fromtimestamp(1773244800, tz=UTC)
+    assert moment.utcoffset() is not None, "an offset is what makes the instant unambiguous"
+    assert len(due_at) > len("2026-03-11"), "the time of day has to survive"
 
 
 @respx.mock
@@ -297,8 +363,8 @@ def test_get_quizzes_resolves_course_and_labels_it(
             "id": 42628,
             "course": "IOS460 - 123246",
             "name": "Actividad semana 2",
-            "opens_at": "2026-03-13",
-            "closes_at": "2026-03-19",
+            "opens_at": _local_iso(1773425040),
+            "closes_at": _local_iso(1773954000),
             "attempt_limit": 1,
             "max_grade": 10,
         }

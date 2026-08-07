@@ -43,8 +43,9 @@ Example `--json` response — the raw course fields:
 ]
 ```
 
-Example `list_courses` response — the same course, curated: dates as ISO strings, a
-`starred` flag instead of `isfavourite`, and no `enddate`, `hidden` or `progress`:
+Example `list_courses` response — the same course, curated: `starts_at` as a full
+timestamp, a `starred` flag instead of `isfavourite`, and no `enddate`, `hidden` or
+`progress`:
 
 ```json
 [
@@ -54,7 +55,7 @@ Example `list_courses` response — the same course, curated: dates as ISO strin
     "fullname": "Introduction to Computer Science",
     "category": "Computer Science",
     "starred": true,
-    "start_date": "2024-01-01",
+    "starts_at": "2024-01-01T00:00:00-03:00",
     "url": "https://campus.example.edu/course/view.php?id=101"
   }
 ]
