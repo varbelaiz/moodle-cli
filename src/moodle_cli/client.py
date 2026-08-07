@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from types import TracebackType
 from typing import Any
 
 import httpx
 
 from moodle_cli.errors import MoodleAPIError, MoodleError
-from moodle_cli.models import Course, Participant, Section, SiteInfo
+from moodle_cli.models import Announcement, Course, Forum, Participant, Section, SiteInfo
 
 REST_PATH = "/webservice/rest/server.php"
 
@@ -159,6 +160,39 @@ class MoodleClient:
                 return participants
             offset += _PARTICIPANT_PAGE_SIZE
 
+    def get_announcements(self, course_ids: Sequence[int] | None = None) -> list[Announcement]:
+        """Posts from each course's news forum, newest first.
+
+        Only a forum with ``type == "news"`` carries announcements; a course's regular
+        discussion forums are skipped. Passing no ids sweeps every enrolled course,
+        dashboard-hidden ones included, so the sweep covers exactly what
+        :meth:`resolve_course` accepts. Uses ``mod_forum_get_forum_discussions``, not the
+        similarly-named ``mod_forum_get_discussions``: the latter is not exposed by this
+        campus's token.
+        """
+        ids = (
+            list(course_ids)
+            if course_ids is not None
+            else [c.id for c in self.list_courses(view="all-including-hidden")]
+        )
+        if not ids:
+            return []
+
+        body = self._call("mod_forum_get_forums_by_courses", courseids=ids)
+        forums = [Forum.model_validate(f) for f in body]
+
+        announcements: list[Announcement] = []
+        for forum in (f for f in forums if f.type == "news"):
+            discussions = self._call("mod_forum_get_forum_discussions", forumid=forum.id)
+            check_warnings(discussions, function="mod_forum_get_forum_discussions")
+            for discussion in discussions.get("discussions", []):
+                announcements.append(
+                    Announcement.model_validate({**discussion, "courseid": forum.course})
+                )
+
+        announcements.sort(key=lambda a: a.created, reverse=True)
+        return announcements
+
     # -- convenience -------------------------------------------------------------
 
     def resolve_course(self, reference: str) -> Course:
@@ -197,6 +231,24 @@ def check_api_error(body: Any, *, function: str | None = None) -> None:
             message=str(body.get("message") or body.get("error") or "Request failed"),
             function=function,
         )
+
+
+def check_warnings(body: Any, *, function: str) -> None:
+    """Raise if a decoded response carries a non-empty ``warnings`` array.
+
+    Moodle reports a per-item failure there while still answering 200 with whatever it
+    could read, so a warnings array left unread turns a partial result into one that
+    cannot be told apart from an empty one.
+    """
+    warnings = body.get("warnings") if isinstance(body, dict) else None
+    if not warnings:
+        return
+    first = warnings[0] if isinstance(warnings[0], dict) else {}
+    raise MoodleAPIError(
+        errorcode=str(first.get("warningcode", "warning")),
+        message=str(first.get("message") or "The request completed with warnings"),
+        function=function,
+    )
 
 
 def _lookup(table: dict[str, str], key: str, label: str) -> str:

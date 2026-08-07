@@ -6,7 +6,9 @@ ignores unknown keys rather than tracking the full upstream schema.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
+from html import unescape
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,9 +17,33 @@ class _Base(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-def _epoch_to_datetime(value: int) -> datetime | None:
-    """Moodle uses 0, not null, for unset timestamps."""
-    return datetime.fromtimestamp(value, tz=UTC) if value else None
+def epoch_to_datetime(value: int) -> datetime | None:
+    """The one epoch conversion, resolved to the reader's local zone.
+
+    Moodle uses 0, not null, for unset timestamps. Every surface converts here: a second
+    conversion pinned to another zone reports a different calendar day for the same
+    evening event, and the campus web UI shows local time.
+    """
+    return datetime.fromtimestamp(value, tz=UTC).astimezone() if value else None
+
+
+#: Tags that end a line of prose. Everything else is stripped without a separator.
+_BLOCK_TAG = re.compile(
+    r"</?(?:br|p|div|li|ul|ol|tr|table|h[1-6]|blockquote)\b[^>]*>", re.IGNORECASE
+)
+_ANY_TAG = re.compile(r"<[^>]+>")
+
+
+def html_to_text(markup: str) -> str:
+    """Plain text from a Moodle HTML fragment, one line per block element.
+
+    Moodle stores authored prose as HTML. Dropping tags without putting a separator in
+    their place runs the last word of a block into the first word of the next, and an
+    entity left encoded reaches the reader as ``&nbsp;``.
+    """
+    stripped = _ANY_TAG.sub("", _BLOCK_TAG.sub("\n", markup))
+    lines = (" ".join(line.split()) for line in unescape(stripped).split("\n"))
+    return "\n".join(line for line in lines if line)
 
 
 class Course(_Base):
@@ -36,12 +62,12 @@ class Course(_Base):
 
     @property
     def started_at(self) -> datetime | None:
-        return _epoch_to_datetime(self.startdate)
+        return epoch_to_datetime(self.startdate)
 
     @property
     def ended_at(self) -> datetime | None:
         """None on this campus: course end dates are never configured."""
-        return _epoch_to_datetime(self.enddate)
+        return epoch_to_datetime(self.enddate)
 
 
 class CourseFile(_Base):
@@ -126,7 +152,42 @@ class Participant(_Base):
 
     @property
     def last_course_access(self) -> datetime | None:
-        return _epoch_to_datetime(self.lastcourseaccess)
+        return epoch_to_datetime(self.lastcourseaccess)
+
+
+class Announcement(_Base):
+    """A post in a course's news forum.
+
+    ``courseid`` is not part of the raw discussion payload; ``MoodleClient.get_announcements``
+    injects it so callers aggregating across courses can tell posts apart.
+    """
+
+    id: int
+    courseid: int = 0
+    subject: str = ""
+    message: str = ""
+    userfullname: str = ""
+    created: int = 0
+    numreplies: int = 0
+    pinned: bool = False
+
+    @property
+    def posted_at(self) -> datetime | None:
+        return epoch_to_datetime(self.created)
+
+    @property
+    def message_text(self) -> str:
+        """``message`` as plain text; forum posts arrive as HTML."""
+        return html_to_text(self.message)
+
+
+class Forum(_Base):
+    """A forum activity. Only ``type == "news"`` carries a course's announcements."""
+
+    id: int
+    course: int
+    type: str = ""
+    name: str = ""
 
 
 class SiteInfo(_Base):

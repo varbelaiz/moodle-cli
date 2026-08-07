@@ -3,24 +3,20 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import parse_qs
 
 import httpx
 import pytest
 import respx
+from pydantic import ValidationError
 
 from moodle_cli.client import SORTS, VIEWS, MoodleClient, _flatten_params, check_api_error
 from moodle_cli.errors import MoodleAPIError, MoodleError
-from tests.conftest import BASE_URL, REST_URL
+from tests.conftest import BASE_URL, REST_URL, posted_params
 
 
 @pytest.fixture
 def client() -> MoodleClient:
     return MoodleClient(BASE_URL, "test-token")
-
-
-def posted_params(request: httpx.Request) -> dict[str, str]:
-    return {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
 
 
 # -- error detection -------------------------------------------------------------
@@ -178,6 +174,99 @@ def test_get_participants_pages_until_short_page(client: MoodleClient) -> None:
 
     assert len(people) == _PARTICIPANT_PAGE_SIZE + 1
     assert posted_params(route.calls[1].request)["options[0][value]"] == str(_PARTICIPANT_PAGE_SIZE)
+
+
+# -- announcements -----------------------------------------------------------------
+
+
+@respx.mock
+def test_get_announcements_only_reads_news_forums(
+    client: MoodleClient,
+    forums_payload: list[dict[str, Any]],
+    discussions_payload: dict[str, Any],
+) -> None:
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=forums_payload),
+            httpx.Response(200, json=discussions_payload),
+        ]
+    )
+
+    announcements = client.get_announcements([101])
+
+    # Two calls total: the general-discussion forum (502) is never queried.
+    assert len(route.calls) == 2
+    assert posted_params(route.calls[1].request)["forumid"] == "501"
+
+    assert [a.id for a in announcements] == [9001, 9000]  # newest first
+    assert all(a.courseid == 101 for a in announcements)
+    assert "<strong>" not in announcements[0].message_text
+    assert "S004" in announcements[0].message_text
+
+
+@respx.mock
+def test_get_announcements_returns_empty_without_a_news_forum(
+    client: MoodleClient, forums_payload: list[dict[str, Any]]
+) -> None:
+    general_only = [f for f in forums_payload if f["type"] != "news"]
+    route = respx.post(REST_URL).mock(return_value=httpx.Response(200, json=general_only))
+
+    assert client.get_announcements([101]) == []
+    assert len(route.calls) == 1  # no discussion read for a forum that carries no news
+
+
+@respx.mock
+def test_get_announcements_sweeps_dashboard_hidden_courses_too(
+    client: MoodleClient, courses_payload: dict[str, Any]
+) -> None:
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=courses_payload),
+            httpx.Response(200, json=[]),
+        ]
+    )
+
+    client.get_announcements()
+
+    assert posted_params(route.calls[0].request)["classification"] == "allincludinghidden"
+    assert posted_params(route.calls[1].request)["courseids[0]"] == "101"
+
+
+@respx.mock
+def test_get_announcements_rejects_a_forum_record_missing_its_course(client: MoodleClient) -> None:
+    """A wire payload becomes a model before use, so a missing field fails by name."""
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=[{"id": 501, "type": "news"}]))
+
+    with pytest.raises(ValidationError) as exc:
+        client.get_announcements([101])
+
+    assert "course" in str(exc.value)
+
+
+@respx.mock
+def test_get_announcements_raises_on_a_warning_beside_the_discussions(
+    client: MoodleClient, forums_payload: list[dict[str, Any]]
+) -> None:
+    """A partial read must not be reported as an empty one."""
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=forums_payload),
+            httpx.Response(
+                200,
+                json={
+                    "discussions": [],
+                    "warnings": [
+                        {"warningcode": "errorreadingforum", "message": "Could not read the forum"}
+                    ],
+                },
+            ),
+        ]
+    )
+
+    with pytest.raises(MoodleAPIError) as exc:
+        client.get_announcements([101])
+
+    assert "errorreadingforum" in str(exc.value)
 
 
 # -- course resolution -----------------------------------------------------------

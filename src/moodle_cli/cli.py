@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import functools
 import json
+import textwrap
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, ParamSpec, TypeVar
@@ -29,14 +29,14 @@ from moodle_cli.downloads import (
     sanitize,
 )
 from moodle_cli.errors import MoodleError
-from moodle_cli.models import Participant, Section
+from moodle_cli.models import Announcement, Participant, Section, epoch_to_datetime
 from moodle_cli.search import SearchHit, search_contents
 
 console = Console()
 err_console = Console(stderr=True)
 
 app = typer.Typer(
-    help="Access a Moodle campus: courses, contents, downloads and participants.",
+    help="Access a Moodle campus: courses, contents, downloads, participants and announcements.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -108,8 +108,14 @@ def _human_size(size: int) -> str:
     return f"{value:.1f} GB"
 
 
-def _format_epoch(value: int) -> str:
-    return datetime.fromtimestamp(value).strftime("%Y-%m-%d") if value else "-"
+def _format_epoch(value: int, fmt: str = "%Y-%m-%d") -> str:
+    """Render a Moodle timestamp, going through the one shared conversion.
+
+    Converting here rather than from the raw epoch is what keeps this surface and the MCP
+    server on the same calendar day for an evening event.
+    """
+    moment = epoch_to_datetime(value)
+    return moment.strftime(fmt) if moment else "-"
 
 
 def _plural(count: int, noun: str) -> str:
@@ -118,7 +124,7 @@ def _plural(count: int, noun: str) -> str:
 
 def _format_year(value: int) -> str:
     """Start year is the only recency signal available: no course here sets an end date."""
-    return datetime.fromtimestamp(value).strftime("%Y") if value else "-"
+    return _format_epoch(value, "%Y")
 
 
 # -- auth ------------------------------------------------------------------------
@@ -514,6 +520,55 @@ def _participant_payload(person: Participant, emails: bool) -> dict[str, Any]:
     if not emails:
         payload.pop("email", None)
     return payload
+
+
+@course_app.command("announcements")
+@handle_errors
+def course_announcements(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """List announcements from a course's news forum, newest first.
+
+    Only a forum Moodle marks as "news" carries announcements; a course without one
+    prints nothing.
+    """
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        announcements = client.get_announcements([resolved.id])
+
+    if as_json:
+        _emit_json([_announcement_payload(a, resolved.shortname) for a in announcements])
+        return
+
+    if not announcements:
+        console.print("[yellow]No announcements.[/yellow]")
+        return
+
+    for a in announcements:
+        pin = " [yellow](pinned)[/yellow]" if a.pinned else ""
+        console.print(f"[bold]{escape(a.subject)}[/bold]{pin}")
+        console.print(
+            f"  [dim]{_format_epoch(a.created, '%Y-%m-%d %H:%M')} — {escape(a.userfullname)}[/dim]"
+        )
+        console.print(textwrap.indent(escape(a.message_text), "  "))
+        console.print()
+
+
+def _announcement_payload(announcement: Announcement, course: str) -> dict[str, Any]:
+    """Build the JSON body field by field, matching the MCP tool key for key.
+
+    ``message`` carries plain text on both surfaces; a model dump would ship raw HTML
+    here and drop the derived fields, so a consumer that learned the schema from one
+    surface would silently mis-read the other.
+    """
+    return {
+        "id": announcement.id,
+        "course": course,
+        "subject": announcement.subject,
+        "message": announcement.message_text,
+        "author": announcement.userfullname,
+        "posted_at": announcement.posted_at.isoformat() if announcement.posted_at else None,
+        "replies": announcement.numreplies,
+        "pinned": announcement.pinned,
+    }
 
 
 def main() -> None:

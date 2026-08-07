@@ -11,6 +11,7 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -44,6 +45,11 @@ def load_fixture(name: str) -> Any:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+def posted_params(request: httpx.Request) -> dict[str, str]:
+    """The form body of a REST call, decoded back into flat parameters."""
+    return {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
+
+
 @pytest.fixture(autouse=True)
 def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
     """Keep the developer's real .env and keyring out of the unit tests.
@@ -73,6 +79,18 @@ def contents_payload() -> list[dict[str, Any]]:
 @pytest.fixture
 def participants_payload() -> list[dict[str, Any]]:
     payload: list[dict[str, Any]] = load_fixture("participants.json")
+    return payload
+
+
+@pytest.fixture
+def forums_payload() -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = load_fixture("forums.json")
+    return payload
+
+
+@pytest.fixture
+def discussions_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("discussions.json")
     return payload
 
 
