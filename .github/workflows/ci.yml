@@ -46,3 +46,20 @@ jobs:
       # skipped by default. Keep it that way, so CI never needs a token.
       - name: pytest
         run: uv run pytest
+
+  # `uv sync` alone installs no plugin, so its own tests, mypy and ruff would otherwise
+  # never run against real code. One job per plugin, syncing that plugin's extra.
+  plugin-anydoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --extra anydoc
+      - name: mypy
+        working-directory: plugins/anydoc
+        run: uv run mypy
+      - name: pytest
+        working-directory: plugins/anydoc
+        run: uv run pytest
