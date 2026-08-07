@@ -386,6 +386,62 @@ def get_assignment_status(assignment_id: int) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_quizzes(course: str | None = None) -> list[dict[str, Any]]:
+    """List quizzes and their open/close windows.
+
+    `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
+    course. Pass a quiz's `id` from this list to get_quiz_status for attempt and grade
+    detail. A null `attempt_limit` means the quiz can be attempted any number of times.
+    """
+    client, _ = _open_client()
+    with client:
+        if course:
+            resolved = client.resolve_course(course)
+            course_names = {resolved.id: resolved.shortname}
+            quizzes = client.get_quizzes([resolved.id])
+        else:
+            course_names = _course_names(client)
+            quizzes = client.get_quizzes()
+
+    return [
+        {
+            "id": q.id,
+            "course": course_names.get(q.course, str(q.course)),
+            "name": q.name,
+            "opens_at": q.opens_at.date().isoformat() if q.opens_at else None,
+            "closes_at": q.closes_at.date().isoformat() if q.closes_at else None,
+            # Moodle encodes "unlimited" as 0 attempts, which reads as "none allowed" to
+            # anyone taking the number at face value.
+            "attempt_limit": q.attempts or None,
+            "max_grade": q.grade,
+        }
+        for q in quizzes
+    ]
+
+
+@mcp.tool()
+def get_quiz_status(quiz_id: int) -> dict[str, Any]:
+    """Attempt count and best grade for one quiz.
+
+    `quiz_id` is the `id` from get_quizzes. `grade` and `grade_to_pass` are scaled to
+    `max_grade`. A false `grade_available` means the grade cannot be read — the quiz may
+    be unattempted, awaiting manual grading, or graded with the marks hidden.
+    """
+    client, _ = _open_client()
+    with client:
+        status = client.get_quiz_status(quiz_id)
+
+    return {
+        "attempts_used": status.attempt_count,
+        "last_attempt_state": status.last_state,
+        "grade_available": status.has_grade,
+        "grade": status.grade,
+        "grade_to_pass": status.grade_to_pass,
+        "max_grade": status.max_grade,
+    }
+
+
+@mcp.tool()
 def get_grade_summary() -> list[dict[str, Any]]:
     """Course-level grade summary across every enrolled course.
 
