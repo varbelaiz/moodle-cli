@@ -185,7 +185,7 @@ class MoodleClient:
         for forum in (f for f in forums if f.type == "news"):
             discussions = self._call("mod_forum_get_forum_discussions", forumid=forum.id)
             check_warnings(discussions, function="mod_forum_get_forum_discussions")
-            for discussion in discussions.get("discussions", []):
+            for discussion in discussions.get("discussions") or []:
                 announcements.append(
                     Announcement.model_validate({**discussion, "courseid": forum.course})
                 )

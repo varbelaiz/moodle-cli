@@ -9,8 +9,9 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from html import unescape
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 class _Base(BaseModel):
@@ -44,6 +45,21 @@ def html_to_text(markup: str) -> str:
     stripped = _ANY_TAG.sub("", _BLOCK_TAG.sub("\n", markup))
     lines = (" ".join(line.split()) for line in unescape(stripped).split("\n"))
     return "\n".join(line for line in lines if line)
+
+
+def _default_if_null(default: Any) -> BeforeValidator:
+    """Read a null as "unset".
+
+    The campus sends ``null`` for an optional field instead of omitting it, so a plain
+    default never applies and a non-optional annotation raises before the caller sees the
+    response. Fields carrying a real absent/present distinction stay explicitly nullable.
+    """
+    return BeforeValidator(lambda value: default if value is None else value)
+
+
+_Text = Annotated[str, _default_if_null("")]
+_Epoch = Annotated[int, _default_if_null(0)]
+_Number = Annotated[float, _default_if_null(0.0)]
 
 
 class Course(_Base):
@@ -164,10 +180,10 @@ class Announcement(_Base):
 
     id: int
     courseid: int = 0
-    subject: str = ""
-    message: str = ""
-    userfullname: str = ""
-    created: int = 0
+    subject: _Text = ""
+    message: _Text = ""
+    userfullname: _Text = ""
+    created: _Epoch = 0
     numreplies: int = 0
     pinned: bool = False
 
