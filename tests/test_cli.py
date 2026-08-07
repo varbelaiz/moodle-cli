@@ -759,3 +759,42 @@ def test_course_grades_fails_loudly_without_gradebook_permission(
 
     assert result.exit_code == 1
     assert "nopermissiontoviewgrades" in result.output
+
+
+# -- the README's promise about --json -----------------------------------------------
+
+#: Core commands that act rather than answer, so they stream progress instead of JSON.
+#: The README names exactly these; a new command landing without `--json` has to either
+#: grow one or be added here and there in the same change.
+CORE_COMMANDS_WITHOUT_JSON = {
+    ("auth", "login"),
+    ("auth", "status"),
+    ("auth", "logout"),
+    ("course", "download"),
+}
+
+CORE_GROUPS = ("auth", "courses", "course", "plugins")
+
+
+def test_only_the_documented_commands_lack_json_output() -> None:
+    """The README promises `--json` on every command that answers a question.
+
+    Checked through `--help` rather than by reading the source, so it holds whatever the
+    option is spelled as internally. Plugin groups are out of scope: their own docs make
+    their own promises.
+    """
+    missing: set[tuple[str, str]] = set()
+
+    for group in CORE_GROUPS:
+        listing = runner.invoke(app, [group, "--help"])
+        assert listing.exit_code == 0, group
+        for line in listing.stdout.splitlines():
+            stripped = line.strip().lstrip("│").strip()
+            name = stripped.split(" ")[0] if stripped else ""
+            if not name or not name[0].isalpha() or name in {"Usage:", "Options", "Commands"}:
+                continue
+            command = runner.invoke(app, [group, name, "--help"])
+            if command.exit_code == 0 and "--json" not in command.stdout:
+                missing.add((group, name))
+
+    assert missing == CORE_COMMANDS_WITHOUT_JSON

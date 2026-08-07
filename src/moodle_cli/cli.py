@@ -39,8 +39,10 @@ from moodle_cli.plugins import (
     CORE_DISTRIBUTION,
     CatalogEntry,
     catalog,
+    extra_distributions,
     installed_extras,
     mount_commands,
+    requirement_name,
 )
 from moodle_cli.search import SearchHit, search_contents
 from moodle_cli.session import open_client
@@ -954,8 +956,12 @@ def _plan(name: str, *, keep: bool) -> tuple[Environment, list[str]]:
                 f'`uv tool install --reinstall "{spec}"` yourself, '
                 "restating every --with package."
             )
-        catalogued = {e.distribution for e in catalog()}
-        foreign = [p for p in injected if p.split("==")[0] not in catalogued]
+        # Only an official plugin can come back as an extra, so only an official one may
+        # be dropped from the injected set. A third-party plugin is in the catalog too,
+        # and filtering against the whole catalog would drop it from `--with` without
+        # `wanted` ever restating it, uninstalling it in silence.
+        installable = set(extra_distributions().values())
+        foreign = [p for p in injected if requirement_name(p) not in installable]
         return env, install_command(env.uv, wanted, foreign)
 
     spec = f"{CORE_DISTRIBUTION}[{name}]" if keep else _known(name).distribution
