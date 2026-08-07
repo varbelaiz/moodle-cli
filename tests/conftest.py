@@ -160,6 +160,24 @@ def site_info_payload() -> dict[str, Any]:
 
 
 @pytest.fixture
+def quizzes_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("quizzes.json")
+    return payload
+
+
+@pytest.fixture
+def quiz_attempts_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("quiz_attempts.json")
+    return payload
+
+
+@pytest.fixture
+def quiz_best_grade_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("quiz_best_grade.json")
+    return payload
+
+
+@pytest.fixture
 def tmp_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.chdir(tmp_path)
     yield tmp_path

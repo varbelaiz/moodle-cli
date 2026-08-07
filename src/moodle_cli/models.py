@@ -274,6 +274,43 @@ class AssignmentStatus(_Base):
         return epoch_to_datetime(self.extensionduedate)
 
 
+class Quiz(_Base):
+    id: int
+    course: int = 0
+    name: _Text = ""
+    timeopen: _Epoch = 0
+    timeclose: _Epoch = 0
+    #: Attempts allowed, where 0 is Moodle's encoding for "unlimited".
+    attempts: int = 0
+    #: The maximum a grade for this quiz is scaled to.
+    grade: _Number = 0
+
+    @property
+    def opens_at(self) -> datetime | None:
+        return epoch_to_datetime(self.timeopen)
+
+    @property
+    def closes_at(self) -> datetime | None:
+        return epoch_to_datetime(self.timeclose)
+
+
+class QuizStatus(_Base):
+    """Curated view of one quiz's attempt history and grade.
+
+    No single endpoint answers "did I take this and how did it go", so
+    ``MoodleClient.get_quiz_status`` assembles this from several.
+    """
+
+    attempt_count: int = 0
+    last_state: str | None = None
+    #: Whether a grade is available to read; a hidden or pending grade is also False.
+    has_grade: bool = False
+    grade: float | None = None
+    grade_to_pass: float | None = None
+    #: The maximum ``grade`` and ``grade_to_pass`` are scaled to.
+    max_grade: float | None = None
+
+
 class CourseGrade(_Base):
     courseid: int
     grade: _Text = ""

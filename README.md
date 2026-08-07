@@ -2,8 +2,8 @@
 
 Command line client and MCP server for a Moodle campus. Lists your courses, reads their
 contents and announcements, downloads the material, shows who is enrolled, and tracks
-assignments and grades — over Moodle's web-service API, with no browser and no HTML
-scraping.
+assignments, quizzes and grades — over Moodle's web-service API, with no browser and no
+HTML scraping.
 
 Works with any Moodle instance that has web services and the mobile service enabled.
 
@@ -21,6 +21,8 @@ Works with any Moodle instance that has web services and the mobile service enab
   - [`moodle course announcements`](#moodle-course-announcements)
   - [`moodle course assignments`](#moodle-course-assignments)
   - [`moodle course assignment-status`](#moodle-course-assignment-status)
+  - [`moodle course quizzes`](#moodle-course-quizzes)
+  - [`moodle course quiz-status`](#moodle-course-quiz-status)
   - [`moodle course grades`](#moodle-course-grades)
 - [MCP server](#mcp-server)
 - [Configuration](#configuration)
@@ -319,6 +321,44 @@ files:
 `assignment-status` takes the `id` printed by `course assignments` — not a course-module
 id, which it rejects.
 
+### `moodle course quizzes`
+
+Lists a course's quizzes and their open/close windows.
+
+```console
+$ moodle course quizzes H202
+                   11 quizzes in H202 - 119768
+┏━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━┓
+┃    id ┃ name               ┃     closes ┃ attempts ┃ max grade ┃
+┡━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━┩
+│ 42628 │ Actividad semana 2 │ 2026-03-19 │        1 │      10.0 │
+│ 42941 │ Actividad semana 3 │ 2026-03-25 │        1 │      10.0 │
+└───────┴────────────────────┴────────────┴──────────┴───────────┘
+```
+
+`attempts` shows `unlimited` when the quiz sets no limit, and `max grade` is the scale a
+grade for the quiz is out of.
+
+The `id` column feeds [`moodle course quiz-status`](#moodle-course-quiz-status).
+
+### `moodle course quiz-status`
+
+Shows attempt count and best grade for one quiz.
+
+```console
+$ moodle course quiz-status 42628
+attempts used: 1
+last attempt: finished
+grade: 6.925 / 10.0 (pass: 4.0)
+```
+
+`quiz-status` takes the `id` printed by `course quizzes`.
+
+The grade comes scaled to the quiz maximum, which is why it is printed next to it. When
+no grade can be read the command says so without claiming the quiz is ungraded: the same
+flag covers an unattempted quiz, one waiting on manual grading, and one whose marks the
+teacher hides.
+
 ### `moodle course grades`
 
 Shows the per-item grade breakdown for one course: assignments, quizzes, and the course
@@ -362,6 +402,8 @@ claude mcp add moodle -- uv run --project /path/to/moodle-cli moodle-mcp
 | `get_course_announcements` | `course` (default: every enrolled course) |
 | `get_assignments` | `course` (default: every enrolled course) |
 | `get_assignment_status` | `assignment_id` |
+| `get_quizzes` | `course` (default: every enrolled course) |
+| `get_quiz_status` | `quiz_id` |
 | `get_grade_summary` | — |
 | `get_grades` | `course` |
 
@@ -440,6 +482,10 @@ works regardless.
 records that as a negative grade holding the scale's id. An assignment marked that way has
 no numeric maximum to report: the listing says `scale`, and the awarded value is readable
 from `assignment-status`.
+
+**Assignments and quizzes are separate Moodle activity types.** An "Attempt quiz now"
+button is a quiz, not an assignment — `course assignments`/`assignment-status` and `course
+quizzes`/`quiz-status` read different web-service functions and do not overlap.
 
 ## Development
 

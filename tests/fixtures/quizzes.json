@@ -1,0 +1,17 @@
+{
+  "quizzes": [
+    {
+      "id": 42628,
+      "coursemodule": 866948,
+      "course": 101,
+      "name": "Actividad semana 2",
+      "intro": "<p>Cuestionario sobre la lectura de la semana.</p>",
+      "timeopen": 1773425040,
+      "timeclose": 1773954000,
+      "timelimit": 0,
+      "attempts": 1,
+      "grade": 10
+    }
+  ],
+  "warnings": []
+}

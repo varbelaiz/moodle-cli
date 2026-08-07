@@ -44,7 +44,7 @@ err_console = Console(stderr=True)
 app = typer.Typer(
     help=(
         "Access a Moodle campus: courses, contents, downloads, participants, "
-        "announcements, assignments and grades."
+        "announcements, assignments, quizzes and grades."
     ),
     no_args_is_help=True,
     add_completion=False,
@@ -725,6 +725,68 @@ def course_assignment_status(assignment_id: AssignmentIdArg, as_json: JsonOpt = 
             console.print(f"  {escape(name)}")
     if status.extensionduedate:
         console.print(f"extension until: {_format_epoch(status.extensionduedate)}")
+
+
+@course_app.command("quizzes")
+@handle_errors
+def course_quizzes(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """List a course's quizzes and their open/close windows."""
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        quizzes = client.get_quizzes([resolved.id])
+
+    if as_json:
+        _emit_json([q.model_dump(mode="json") for q in quizzes])
+        return
+
+    table = Table(title=f"{len(quizzes)} quizzes in {resolved.shortname}")
+    table.add_column("id", justify="right", style="dim")
+    table.add_column("name")
+    table.add_column("closes", justify="right", style="dim")
+    table.add_column("attempts", justify="right", style="dim")
+    table.add_column("max grade", justify="right", style="dim")
+    for q in quizzes:
+        attempts = str(q.attempts) if q.attempts else "unlimited"
+        table.add_row(
+            str(q.id),
+            escape(q.name),
+            _format_epoch(q.timeclose),
+            attempts,
+            str(q.grade),
+        )
+    console.print(table)
+
+
+QuizIdArg = Annotated[int, typer.Argument(help="Quiz id, as shown by `course quizzes`.")]
+
+
+@course_app.command("quiz-status")
+@handle_errors
+def course_quiz_status(quiz_id: QuizIdArg, as_json: JsonOpt = False) -> None:
+    """Show attempt count and best grade for one quiz.
+
+    `quiz_id` is the id from `course quizzes`.
+    """
+    with _client() as client:
+        status = client.get_quiz_status(quiz_id)
+
+    if as_json:
+        _emit_json(status.model_dump(mode="json"))
+        return
+
+    console.print(f"attempts used: {status.attempt_count}")
+    if status.last_state:
+        console.print(f"last attempt: {status.last_state}")
+    if status.has_grade:
+        # The grade arrives already scaled to the quiz maximum, so it reads as a
+        # proportion only next to that maximum.
+        scale = f" / {status.max_grade}" if status.max_grade else ""
+        pass_note = f" (pass: {status.grade_to_pass})" if status.grade_to_pass else ""
+        console.print(f"grade: {status.grade}{scale}{pass_note}")
+    else:
+        # One flag covers never attempted, awaiting manual grading, and graded with the
+        # marks hidden by the quiz's review options — so report availability, not grading.
+        console.print("grade: not available (not graded yet, or hidden by the quiz)")
 
 
 @course_app.command("grades")

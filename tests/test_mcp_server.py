@@ -23,6 +23,8 @@ from moodle_cli.mcp_server import (
     get_course_announcements,
     get_grade_summary,
     get_grades,
+    get_quiz_status,
+    get_quizzes,
     search_courses,
 )
 from tests.conftest import REST_URL, posted_params, route_by_function
@@ -277,6 +279,107 @@ def test_get_assignment_status_reports_submission_and_grade(
     assert result["grade"] == "90.00000"
     assert result["grade_display"] == "90.00\xa0/\xa0100.00"
     assert result["submitted_files"] == ["Entrega - Semana 1.pdf"]
+
+
+@respx.mock
+def test_get_quizzes_resolves_course_and_labels_it(
+    courses_payload: dict[str, Any], quizzes_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_quiz_get_quizzes_by_courses=quizzes_payload,
+    )
+
+    results = get_quizzes("IOS460")
+
+    assert results == [
+        {
+            "id": 42628,
+            "course": "IOS460 - 123246",
+            "name": "Actividad semana 2",
+            "opens_at": "2026-03-13",
+            "closes_at": "2026-03-19",
+            "attempt_limit": 1,
+            "max_grade": 10,
+        }
+    ]
+
+
+@respx.mock
+def test_get_quizzes_reports_an_unlimited_attempt_limit_as_null(
+    courses_payload: dict[str, Any], quizzes_payload: dict[str, Any]
+) -> None:
+    """Moodle's 0 means unlimited, and a reader takes a bare 0 to mean none allowed."""
+    quizzes_payload["quizzes"][0]["attempts"] = 0
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_quiz_get_quizzes_by_courses=quizzes_payload,
+    )
+
+    results = get_quizzes("IOS460")
+
+    assert results[0]["attempt_limit"] is None
+
+
+@respx.mock
+def test_a_quiz_in_a_course_hidden_from_the_dashboard_is_still_named(
+    courses_payload: dict[str, Any],
+    hidden_course: dict[str, Any],
+    quizzes_payload: dict[str, Any],
+) -> None:
+    """The quiz sweep answers for every enrolment, so the course lookup must too."""
+    quizzes_payload["quizzes"][0]["course"] = 104
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=lambda body: (
+            {"courses": [*courses_payload["courses"], hidden_course]}
+            if "classification=allincludinghidden" in body
+            else courses_payload
+        ),
+        mod_quiz_get_quizzes_by_courses=quizzes_payload,
+    )
+
+    assert get_quizzes()[0]["course"] == "I204 - 101313"
+
+
+@respx.mock
+def test_get_quiz_status_reports_attempts_and_grade(
+    quiz_attempts_payload: dict[str, Any],
+    quiz_best_grade_payload: dict[str, Any],
+    quizzes_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_attempts_payload,
+        mod_quiz_get_user_best_grade=quiz_best_grade_payload,
+        mod_quiz_get_quizzes_by_courses=quizzes_payload,
+    )
+
+    result = get_quiz_status(42628)
+
+    assert result == {
+        "attempts_used": 1,
+        "last_attempt_state": "finished",
+        "grade_available": True,
+        "grade": 6.925,
+        "grade_to_pass": 4,
+        "max_grade": 10,
+    }
+
+
+@respx.mock
+def test_get_quiz_status_reports_a_hidden_grade_as_unavailable_not_ungraded(
+    quiz_attempts_payload: dict[str, Any],
+) -> None:
+    """hasgrade covers pending and hidden grades too, so it reports availability."""
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_attempts_payload,
+        mod_quiz_get_user_best_grade={"hasgrade": False, "warnings": []},
+    )
+
+    result = get_quiz_status(42628)
+
+    assert result["attempts_used"] == 1
+    assert result["grade_available"] is False
+    assert result["grade"] is None
 
 
 @respx.mock

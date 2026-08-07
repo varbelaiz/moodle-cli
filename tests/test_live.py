@@ -139,6 +139,16 @@ def test_every_assignment_status_parses(live_client: MoodleClient) -> None:
         assert isinstance(status.graded, bool)
 
 
+def test_get_quizzes_and_status_round_trip(live_client: MoodleClient) -> None:
+    quizzes = live_client.get_quizzes()
+    if not quizzes:
+        pytest.skip("no enrolled course currently has a quiz")
+
+    status = live_client.get_quiz_status(quizzes[0].id)
+    assert status.attempt_count >= 0
+    assert isinstance(status.has_grade, bool)
+
+
 def test_get_grade_overview_always_succeeds(live_client: MoodleClient) -> None:
     """Unlike get_grade_items, this must never raise nopermissiontoviewgrades."""
     live_client.get_grade_overview()

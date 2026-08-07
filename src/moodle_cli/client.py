@@ -19,6 +19,8 @@ from moodle_cli.models import (
     Forum,
     GradeItem,
     Participant,
+    Quiz,
+    QuizStatus,
     Section,
     SiteInfo,
 )
@@ -246,6 +248,46 @@ class MoodleClient:
             extensionduedate=lastattempt.get("extensionduedate") or 0,
             submitted_files=files,
         )
+
+    def get_quizzes(self, course_ids: list[int] | None = None) -> list[Quiz]:
+        """Quizzes across courses; every enrolment if ``course_ids`` is omitted.
+
+        Omitting ``courseids`` lets Moodle fall back to the full enrolment list, which
+        includes courses the dashboard hides; listing courses here would not.
+        """
+        params: dict[str, Any] = {"courseids": course_ids} if course_ids else {}
+        body = self._call("mod_quiz_get_quizzes_by_courses", **params)
+        return [Quiz.model_validate(q) for q in body.get("quizzes", [])]
+
+    def get_quiz_status(self, quiz_id: int) -> QuizStatus:
+        """Attempt history and best grade for one quiz.
+
+        Three sources, because none alone answers "did I take this and how did it go":
+        ``mod_quiz_get_user_attempts`` carries no grade, ``mod_quiz_get_user_best_grade``
+        carries no attempt history, and neither reports the maximum the grade is already
+        scaled to — that lives on the quiz, and is fetched only when there is a grade to
+        scale.
+        """
+        attempts_body = self._call(
+            "mod_quiz_get_user_attempts", quizid=quiz_id, status="all", includepreviews=0
+        )
+        # Moodle orders attempts ascending, so the last entry is the most recent one.
+        attempts = attempts_body.get("attempts", [])
+        grade_body = self._call("mod_quiz_get_user_best_grade", quizid=quiz_id)
+        has_grade = grade_body.get("hasgrade", False)
+
+        return QuizStatus(
+            attempt_count=len(attempts),
+            last_state=attempts[-1].get("state") if attempts else None,
+            has_grade=has_grade,
+            grade=grade_body.get("grade"),
+            grade_to_pass=grade_body.get("gradetopass"),
+            max_grade=self._quiz_max_grade(quiz_id) if has_grade else None,
+        )
+
+    def _quiz_max_grade(self, quiz_id: int) -> float | None:
+        """The maximum a quiz grades out of; ``None`` when the quiz is no longer listed."""
+        return next((q.grade for q in self.get_quizzes() if q.id == quiz_id), None)
 
     def get_grade_overview(self) -> list[CourseGrade]:
         """Course-level grade summary across every enrolled course.
