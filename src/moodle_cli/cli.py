@@ -241,7 +241,7 @@ def _short_name(fullname: str, shortname: str) -> str:
 @course_app.command("contents")
 @handle_errors
 def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
-    """Show a course's sections, activities and downloadable files."""
+    """Show a course's sections, activities, downloadable files and external links."""
     with _client() as client:
         resolved = client.resolve_course(course)
         sections = client.get_course_contents(resolved.id)
@@ -253,7 +253,9 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
     console.print(f"[bold]{escape(resolved.shortname)}[/bold] — {escape(resolved.fullname)}\n")
     for section in sections:
         files = sum(len(m.files) for m in section.modules)
-        suffix = f"  [dim]({files} {_plural(files, 'file')})[/dim]" if files else ""
+        links = sum(len(m.links) for m in section.modules)
+        counts = [c for c in [_count(files, "file"), _count(links, "link")] if c]
+        suffix = f"  [dim]({', '.join(counts)})[/dim]" if counts else ""
         console.print(
             f"[bold cyan]{section.section:>2}. {escape(section.name)}[/bold cyan]{suffix}"
         )
@@ -264,7 +266,13 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
                 # Size leads so a long filename wrapping cannot orphan it on its own line.
                 size = _human_size(file.filesize).rjust(9)
                 console.print(f"       [dim]{size}[/dim]  {escape(file.filename)}")
+            for link in module.links:
+                console.print(f"       [dim]{'link':>9}[/dim]  {escape(link.fileurl or '')}")
         console.print()
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {_plural(n, noun)}" if n else ""
 
 
 @course_app.command("download")

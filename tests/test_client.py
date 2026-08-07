@@ -144,6 +144,24 @@ def test_get_course_contents_keeps_only_real_files(
 
 
 @respx.mock
+def test_get_course_contents_surfaces_url_module_targets_as_links(
+    client: MoodleClient, contents_payload: list[dict[str, Any]]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=contents_payload))
+
+    sections = client.get_course_contents(101)
+    links = [link for s in sections for m in s.modules for link in m.links]
+
+    assert len(links) == 1
+    assert links[0].filename == "Slack de la Materia"
+    assert links[0].fileurl == "https://slack.example.com/join"
+    # A url module's target never shows up in `files`: there is nothing to download.
+    assert all(
+        link not in [f for s in sections for m in s.modules for f in m.files] for link in links
+    )
+
+
+@respx.mock
 def test_get_participants_pages_until_short_page(client: MoodleClient) -> None:
     from moodle_cli.client import _PARTICIPANT_PAGE_SIZE
 

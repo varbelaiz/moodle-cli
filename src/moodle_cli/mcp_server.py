@@ -68,11 +68,13 @@ def list_courses(view: View = "all", sort: Sort = "name") -> list[dict[str, Any]
 
 @mcp.tool()
 def get_course_contents(course: str) -> dict[str, Any]:
-    """Show a course's sections, activities and available files.
+    """Show a course's sections, activities, available files and external links.
 
     `course` accepts a numeric id or a shortname prefix such as "IOS460".
-    File entries list names, sizes and MIME types. To fetch them, call
+    File entries list names, sizes and MIME types; to fetch them, call
     download_course_files, optionally narrowing by section number or module type.
+    Link entries (a "url" module's actual destination, e.g. a recorded-class or
+    external-site link) are informational only — nothing downloads them.
     """
     client, _ = _open_client()
     with client:
@@ -97,6 +99,9 @@ def get_course_contents(course: str) -> dict[str, Any]:
                         "files": [
                             {"filename": f.filename, "size": f.filesize, "mimetype": f.mimetype}
                             for f in module.files
+                        ],
+                        "links": [
+                            {"name": link.filename, "url": link.fileurl} for link in module.links
                         ],
                     }
                     for module in section.modules

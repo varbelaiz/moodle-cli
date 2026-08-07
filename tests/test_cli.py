@@ -271,3 +271,23 @@ def test_api_error_is_reported_cleanly(courses_payload: dict[str, Any]) -> None:
 
     assert result.exit_code == 1
     assert "invalidtoken" in result.output
+
+
+# -- links ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_contents_shows_a_url_modules_target_as_a_link(
+    courses_payload: dict[str, Any], contents_payload: list[dict[str, Any]]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(app, ["course", "contents", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "1 link" in result.output
+    assert "Slack de la Materia" in result.output
+    assert "https://slack.example.com/join" in result.output

@@ -101,7 +101,7 @@ The `--json` output carries more fields than the table, including `category`, `s
 
 ### `moodle course contents`
 
-Shows a course's sections, activities and downloadable files.
+Shows a course's sections, activities, downloadable files and external links.
 
 ```console
 $ moodle course contents IOS460
@@ -115,11 +115,19 @@ IOS460 - 123246 — Taller de Desarrollo de Software
         840.6 KB  _Carátula licencia.pdf
          28.0 MB  Bass, L. Software Architecture in Practice.pdf
      lti        Clases Grabadas
+
+15. Importante acceder  (2 links)
+     url        Slack de la Materia
+            link  https://join.slack.com/t/example-course/shared_invite/...
+     url        Organización de GitHub de la materia
+            link  https://github.com/example-course
 ```
 
-Activities without downloadable files — forums, quizzes, assignments, external links — are
-listed without file entries. Filenames printed here can be passed verbatim to
-`course download --file`.
+Activities without downloadable files — forums, quizzes, assignments — are listed without
+file entries. A `url` module (an external link, e.g. a recorded-class or third-party site)
+shows its actual destination as a `link` line instead: nothing follows it, it is
+informational only. Filenames printed here can be passed verbatim to `course download
+--file`.
 
 ### `moodle course download`
 
@@ -195,6 +203,10 @@ claude mcp add moodle -- uv run --project /path/to/moodle-cli moodle-mcp
 `download_course_files` writes to disk and returns a manifest of paths, sizes and per-file
 status. It never returns file contents: a single course can hold hundreds of megabytes, and
 the agent can read whatever it needs from disk afterwards. Emails are opt-in here too.
+
+`get_course_contents` includes a `links` entry per module for `url`-type activities (a
+recorded-class or external-site link) — the destination is informational, not something
+any tool downloads.
 
 ## Configuration
 
