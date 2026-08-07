@@ -11,6 +11,7 @@ Works with any Moodle instance that has web services and the mobile service enab
 - [Command reference](#command-reference)
   - [`moodle auth`](#moodle-auth)
   - [`moodle courses list`](#moodle-courses-list)
+  - [`moodle courses search`](#moodle-courses-search)
   - [`moodle course contents`](#moodle-course-contents)
   - [`moodle course download`](#moodle-course-download)
   - [`moodle course participants`](#moodle-course-participants)
@@ -98,6 +99,36 @@ $ moodle courses list --view starred --sort last-accessed
 
 The `--json` output carries more fields than the table, including `category`, `startdate`,
 `enddate`, `progress`, `hidden` and `viewurl`.
+
+### `moodle courses search`
+
+Searches section, activity, file and link names across every enrolled course at once,
+including the ones hidden from your dashboard. Answers "which course has X" without
+reading each course in turn.
+
+| Option | Description |
+| --- | --- |
+| `--json` | JSON output. |
+
+```console
+$ moodle courses search github.com
+                            2 results for 'github.com'
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┓
+┃ course          ┃ section             ┃ match  ┃ activity        ┃ files and links    ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩
+│ IOS460 - 123246 │ 15. Importante acc… │ link   │ Organización d… │ https://github.co… │
+└─────────────────┴─────────────────────┴────────┴─────────────────┴────────────────────┘
+```
+
+The match is a case-insensitive substring. Links match on their destination as well as on
+their label, so a bare domain finds them. The `match` column says what was hit — a section,
+an activity name, a file or a link — and that changes what the last column means: on an
+activity-name hit it lists the activity's whole contents, on a file or link hit only the
+entries that matched. Results are capped; a query that hits the cap says so, and wants
+narrowing rather than paging.
+
+The section number is part of every result, so a hit feeds straight into
+`course download --section N`.
 
 ### `moodle course contents`
 

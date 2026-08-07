@@ -291,3 +291,45 @@ def test_contents_shows_a_url_modules_target_as_a_link(
     assert "1 link" in result.output
     assert "Slack de la Materia" in result.output
     assert "https://slack.example.com/join" in result.output
+
+
+# -- search ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_courses_search_renders_a_table(
+    courses_payload: dict[str, Any], contents_payload: list[dict[str, Any]]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "search", "Material Bibliogr"])
+
+    # Asserted on the short filename rather than the activity name or a URL: the table
+    # ellipsizes the activity column and folds long links across lines.
+    assert result.exit_code == 0
+    assert "3 results" in result.stdout
+    assert "module" in result.stdout
+    assert "Cap 1.pdf" in result.stdout
+
+
+@respx.mock
+def test_courses_search_json_matches_the_mcp_payload(
+    courses_payload: dict[str, Any], contents_payload: list[dict[str, Any]]
+) -> None:
+    """One search, one shape: the table and the tool must not diverge on what was found."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "search", "Cap 1", "--json"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["truncated"] is False
+    assert [r["match"] for r in data["results"]] == ["file"] * 3
+    assert all(r["files"] == ["Cap 1.pdf"] for r in data["results"])
+    assert all(r["section_number"] == 0 for r in data["results"])

@@ -30,6 +30,7 @@ from moodle_cli.downloads import (
 )
 from moodle_cli.errors import MoodleError
 from moodle_cli.models import Participant, Section
+from moodle_cli.search import SearchHit, search_contents
 
 console = Console()
 err_console = Console(stderr=True)
@@ -233,6 +234,54 @@ def _short_name(fullname: str, shortname: str) -> str:
     if code and fullname.startswith(f"{code} - "):
         return fullname[len(code) + 3 :]
     return fullname
+
+
+@courses_app.command("search")
+@handle_errors
+def courses_search(
+    query: Annotated[str, typer.Argument(help="Text to look for in names, case-insensitive.")],
+    as_json: JsonOpt = False,
+) -> None:
+    """Search section, activity, file and link names across every enrolled course.
+
+    A link matches on its destination as well as on its label, so a bare domain such as
+    github.com finds it. The match column names what was hit; when it is an activity name,
+    the files and links shown are the activity's whole contents rather than a filtered set.
+    """
+    with _client() as client:
+        results = search_contents(client, query)
+
+    if as_json:
+        _emit_json(results.as_payload())
+        return
+
+    if not results.hits:
+        console.print("[yellow]No matches.[/yellow]")
+        return
+
+    count = len(results.hits)
+    table = Table(title=f"{count} {_plural(count, 'result')} for {query!r}", expand=True)
+    table.add_column("course", no_wrap=True)
+    table.add_column("section", style="dim", no_wrap=True, overflow="ellipsis")
+    table.add_column("match", style="dim", no_wrap=True)
+    table.add_column("activity", ratio=1, min_width=16, no_wrap=True, overflow="ellipsis")
+    table.add_column("files and links", ratio=1, min_width=16, overflow="fold")
+    for hit in results.hits:
+        table.add_row(
+            hit.course,
+            f"{hit.section_number}. {hit.section}",
+            hit.kind.value,
+            hit.module or "-",
+            _hit_contents(hit),
+        )
+    console.print(table)
+    if results.truncated:
+        console.print("[yellow]More matches than shown; narrow the query.[/yellow]")
+
+
+def _hit_contents(hit: SearchHit) -> str:
+    names = [f.filename for f in hit.files] + [link.fileurl or "" for link in hit.links]
+    return "\n".join(names) or "-"
 
 
 # -- course ----------------------------------------------------------------------
