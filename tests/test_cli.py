@@ -437,6 +437,23 @@ def test_a_scale_graded_assignment_shows_no_numeric_maximum(
 
 
 @respx.mock
+def test_courses_assignments_spans_every_course_by_due_date(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "assignments"])
+
+    assert result.exit_code == 0
+    assert "IOS460 - 123246" in result.output
+    # The earlier deadline comes first, whatever order the campus listed them in.
+    assert result.output.index("2026-02-25") < result.output.index("2026-03-11")
+
+
+@respx.mock
 def test_assignment_status_decodes_the_grade_and_lists_submitted_files(
     submission_status_payload: dict[str, Any],
 ) -> None:

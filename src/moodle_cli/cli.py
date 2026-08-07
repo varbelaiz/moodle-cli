@@ -265,6 +265,45 @@ def courses_grades(as_json: JsonOpt = False) -> None:
     console.print(table)
 
 
+@courses_app.command("assignments")
+@handle_errors
+def courses_assignments(as_json: JsonOpt = False) -> None:
+    """List assignments and due dates across every enrolled course.
+
+    Ordered by due date, undated last, so the next deadline is at the top. For one course,
+    use `course assignments`.
+    """
+    with _client() as client:
+        course_names = _course_names(client)
+        assignments = sorted(client.get_assignments(), key=_by_due_date)
+
+    if as_json:
+        _emit_json([a.model_dump(mode="json") for a in assignments])
+        return
+
+    count = len(assignments)
+    table = Table(title=f"{count} {_plural(count, 'assignment')}")
+    table.add_column("id", justify="right", style="dim")
+    table.add_column("course", no_wrap=True)
+    table.add_column("name")
+    table.add_column("due", justify="right", style="dim")
+    table.add_column("grade", justify="right", style="dim")
+    for a in assignments:
+        table.add_row(
+            str(a.id),
+            escape(course_names.get(a.course, str(a.course))),
+            escape(a.name),
+            _format_epoch(a.duedate),
+            _grade_cell(a),
+        )
+    console.print(table)
+
+
+def _by_due_date(assignment: Assignment) -> tuple[bool, int]:
+    """Sort undated assignments after dated ones: 0 means "no due date", not "the epoch"."""
+    return (assignment.duedate == 0, assignment.duedate)
+
+
 def _course_names(client: MoodleClient) -> dict[int, str]:
     """Shortname per course id, for labelling rows that carry only an id.
 
