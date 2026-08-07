@@ -105,3 +105,18 @@ def test_course_contents_url_modules_expose_a_real_link(live_client: MoodleClien
                     assert link.fileurl != module.url
                     return
     pytest.skip("no enrolled course currently has a url module")
+
+
+def test_get_announcements_reads_a_real_news_forum(live_client: MoodleClient) -> None:
+    """mod_forum_get_forum_discussions must stay exposed; get_discussions (no "forum_") is not."""
+    for course in live_client.list_courses(view="all"):
+        announcements = live_client.get_announcements([course.id])
+        if announcements:
+            assert announcements[0].subject
+            assert announcements[0].courseid == course.id
+            # Real posts are HTML: entities decoded and blocks kept apart, or the text
+            # reads as "Estimados,Ya tienen el examen subido."
+            assert "&nbsp;" not in announcements[0].message_text
+            assert "<" not in announcements[0].message_text
+            return
+    pytest.skip("no enrolled course currently has announcements")

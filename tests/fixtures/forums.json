@@ -1,0 +1,16 @@
+[
+  {
+    "id": 501,
+    "course": 101,
+    "type": "news",
+    "name": "Avisos",
+    "cmid": 1
+  },
+  {
+    "id": 502,
+    "course": 101,
+    "type": "general",
+    "name": "Foro de consultas",
+    "cmid": 6
+  }
+]

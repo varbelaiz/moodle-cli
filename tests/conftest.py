@@ -83,6 +83,18 @@ def participants_payload() -> list[dict[str, Any]]:
 
 
 @pytest.fixture
+def forums_payload() -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = load_fixture("forums.json")
+    return payload
+
+
+@pytest.fixture
+def discussions_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("discussions.json")
+    return payload
+
+
+@pytest.fixture
 def tmp_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.chdir(tmp_path)
     yield tmp_path

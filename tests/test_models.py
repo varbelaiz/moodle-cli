@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from moodle_cli.models import epoch_to_datetime, html_to_text
+from moodle_cli.models import Announcement, epoch_to_datetime, html_to_text
 
 # Two paragraphs, a line break, a list and two entities: everything a real forum post
 # throws at the converter, in one string.
@@ -36,6 +36,11 @@ def test_html_to_text_treats_a_non_breaking_space_as_a_space() -> None:
     assert html_to_text("<p>Buenas&nbsp;tardes,&nbsp;&nbsp;desocult&eacute; el material.</p>") == (
         "Buenas tardes, desoculté el material."
     )
+
+
+def test_announcement_message_text_is_plain_text() -> None:
+    announcement = Announcement.model_validate({"id": 1, "message": POST})
+    assert announcement.message_text == html_to_text(POST)
 
 
 def test_epoch_to_datetime_resolves_to_local_wall_clock() -> None:

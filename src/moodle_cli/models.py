@@ -155,6 +155,41 @@ class Participant(_Base):
         return epoch_to_datetime(self.lastcourseaccess)
 
 
+class Announcement(_Base):
+    """A post in a course's news forum.
+
+    ``courseid`` is not part of the raw discussion payload; ``MoodleClient.get_announcements``
+    injects it so callers aggregating across courses can tell posts apart.
+    """
+
+    id: int
+    courseid: int = 0
+    subject: str = ""
+    message: str = ""
+    userfullname: str = ""
+    created: int = 0
+    numreplies: int = 0
+    pinned: bool = False
+
+    @property
+    def posted_at(self) -> datetime | None:
+        return epoch_to_datetime(self.created)
+
+    @property
+    def message_text(self) -> str:
+        """``message`` as plain text; forum posts arrive as HTML."""
+        return html_to_text(self.message)
+
+
+class Forum(_Base):
+    """A forum activity. Only ``type == "news"`` carries a course's announcements."""
+
+    id: int
+    course: int
+    type: str = ""
+    name: str = ""
+
+
 class SiteInfo(_Base):
     sitename: str = ""
     username: str = ""
