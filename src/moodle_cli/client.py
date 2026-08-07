@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from collections.abc import Sequence
 from types import TracebackType
 from typing import Any
@@ -9,7 +10,18 @@ from typing import Any
 import httpx
 
 from moodle_cli.errors import MoodleAPIError, MoodleError
-from moodle_cli.models import Announcement, Course, Forum, Participant, Section, SiteInfo
+from moodle_cli.models import (
+    Announcement,
+    Assignment,
+    AssignmentStatus,
+    Course,
+    CourseGrade,
+    Forum,
+    GradeItem,
+    Participant,
+    Section,
+    SiteInfo,
+)
 
 REST_PATH = "/webservice/rest/server.php"
 
@@ -185,13 +197,79 @@ class MoodleClient:
         for forum in (f for f in forums if f.type == "news"):
             discussions = self._call("mod_forum_get_forum_discussions", forumid=forum.id)
             check_warnings(discussions, function="mod_forum_get_forum_discussions")
-            for discussion in discussions.get("discussions", []):
+            for discussion in discussions.get("discussions") or []:
                 announcements.append(
                     Announcement.model_validate({**discussion, "courseid": forum.course})
                 )
 
         announcements.sort(key=lambda a: a.created, reverse=True)
         return announcements
+
+    def get_assignments(self, course_ids: list[int] | None = None) -> list[Assignment]:
+        """Assignments across courses; every enrolled course if ``course_ids`` is omitted."""
+        params: dict[str, Any] = {"courseids": course_ids} if course_ids else {}
+        body = self._call("mod_assign_get_assignments", **params)
+        return [
+            Assignment.model_validate(a)
+            for course in body.get("courses") or []
+            for a in course.get("assignments") or []
+        ]
+
+    def get_assignment_status(self, assignment_id: int) -> AssignmentStatus:
+        """Submission and grading status for one assignment.
+
+        ``assignment_id`` is the assignment's own ``id`` (from :meth:`get_assignments`),
+        not the course-module id: passing a cmid raises ``invalidrecordunknown``.
+        """
+        body = self._call("mod_assign_get_submission_status", assignid=assignment_id)
+        lastattempt = body.get("lastattempt") or {}
+        # A team assignment records the group's attempt under its own key; the shapes match.
+        submission = lastattempt.get("submission") or lastattempt.get("teamsubmission") or {}
+        feedback = body.get("feedback") or {}
+        grade = feedback.get("grade") or {}
+
+        files = [
+            file["filename"]
+            for plugin in submission.get("plugins") or []
+            if plugin.get("type") == "file"
+            for area in plugin.get("fileareas") or []
+            for file in area.get("files") or []
+        ]
+
+        # Every read below is `or default`, never `get(key, default)`: this campus sends an
+        # unset field as null, which a default cannot displace.
+        return AssignmentStatus(
+            status=submission.get("status"),
+            gradingstatus=lastattempt.get("gradingstatus") or "",
+            grade=grade.get("grade"),
+            gradefordisplay=html.unescape(feedback.get("gradefordisplay") or ""),
+            extensionduedate=lastattempt.get("extensionduedate") or 0,
+            submitted_files=files,
+        )
+
+    def get_grade_overview(self) -> list[CourseGrade]:
+        """Course-level grade summary across every enrolled course.
+
+        Unlike :meth:`get_grade_items`, this works regardless of whether an instructor
+        has enabled the gradebook for students in a given course.
+        """
+        info = self.get_site_info()
+        body = self._call("gradereport_overview_get_course_grades", userid=info.userid)
+        return [CourseGrade.model_validate(g) for g in body.get("grades") or []]
+
+    def get_grade_items(self, course_id: int) -> list[GradeItem]:
+        """Per-item grade breakdown for one course.
+
+        Raises :class:`MoodleAPIError` with ``errorcode == "nopermissiontoviewgrades"``
+        when the instructor has not enabled the gradebook for students in this course —
+        this is a per-course setting, not a blanket token restriction.
+        """
+        info = self.get_site_info()
+        body = self._call(
+            "gradereport_user_get_grade_items", courseid=course_id, userid=info.userid
+        )
+        usergrades = body.get("usergrades") or [{}]
+        return [GradeItem.model_validate(item) for item in usergrades[0].get("gradeitems") or []]
 
     # -- convenience -------------------------------------------------------------
 

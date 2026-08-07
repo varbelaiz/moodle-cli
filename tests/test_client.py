@@ -269,6 +269,192 @@ def test_get_announcements_raises_on_a_warning_beside_the_discussions(
     assert "errorreadingforum" in str(exc.value)
 
 
+# -- assignments -------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_assignments_flattens_courses(
+    client: MoodleClient, assignments_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=assignments_payload))
+
+    assignments = client.get_assignments()
+
+    assert [a.name for a in assignments] == ["Actividad semana 1", "Trabajo Práctico 1"]
+    assert all(a.course == 101 for a in assignments)
+
+
+@respx.mock
+def test_a_negative_grade_is_a_scale_id_and_not_a_maximum(
+    client: MoodleClient, assignments_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=assignments_payload))
+
+    points, scale = client.get_assignments()
+
+    assert points.scale_graded is False
+    assert points.max_grade == 100
+    assert scale.grade == -52  # the scale's id, as the campus sends it
+    assert scale.scale_graded is True
+    assert scale.max_grade is None
+
+
+@respx.mock
+def test_get_assignment_status_extracts_submission_and_grade(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    status = client.get_assignment_status(40393)
+
+    assert status.submitted is True
+    assert status.graded is True
+    assert status.grade == "90.00000"
+    # &nbsp; arrives HTML-escaped and is decoded, not left literal.
+    assert status.gradefordisplay == "90.00\xa0/\xa0100.00"
+    assert status.submitted_files == ["Entrega - Semana 1.pdf"]
+
+
+@respx.mock
+def test_a_null_optional_field_in_a_status_payload_does_not_crash(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    """The campus sends null for an unset optional field instead of omitting it."""
+    submission_status_payload["lastattempt"].update(
+        gradingstatus=None, extensionduedate=None, submission=None
+    )
+    submission_status_payload["feedback"].update(gradefordisplay=None, grade=None)
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    status = client.get_assignment_status(40393)
+
+    assert status.submitted is False
+    assert status.graded is False
+    assert status.grade is None
+    assert status.gradefordisplay == ""
+    assert status.extension_due_at is None
+    assert status.submitted_files == []
+
+
+@respx.mock
+def test_a_released_grade_under_a_marking_workflow_counts_as_graded(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    """Marking workflow replaces graded/notgraded with its own states; only one is visible."""
+    submission_status_payload["lastattempt"]["gradingstatus"] = "released"
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    assert client.get_assignment_status(40393).graded is True
+
+
+@respx.mock
+def test_an_unreleased_grade_under_a_marking_workflow_counts_as_ungraded(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    submission_status_payload["lastattempt"]["gradingstatus"] = "inmarking"
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    assert client.get_assignment_status(40393).graded is False
+
+
+@respx.mock
+def test_a_group_submission_is_read_from_the_team_record(
+    client: MoodleClient, submission_status_payload: dict[str, Any]
+) -> None:
+    """A team assignment files the attempt under teamsubmission and leaves submission unset."""
+    lastattempt = submission_status_payload["lastattempt"]
+    lastattempt["teamsubmission"] = lastattempt.pop("submission")
+    lastattempt["submission"] = None
+    respx.post(REST_URL).mock(return_value=httpx.Response(200, json=submission_status_payload))
+
+    status = client.get_assignment_status(40393)
+
+    assert status.submitted is True
+    assert status.submitted_files == ["Entrega - Semana 1.pdf"]
+
+
+# -- grades ----------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_grade_overview_uses_the_tokens_own_user_id(
+    client: MoodleClient, grades_overview_payload: dict[str, Any]
+) -> None:
+    route = respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(200, json=grades_overview_payload),
+        ]
+    )
+
+    grades = client.get_grade_overview()
+
+    assert posted_params(route.calls[1].request)["userid"] == "63643"
+    assert [g.courseid for g in grades] == [101, 102]
+    assert grades[0].grade == "85.00"
+    # A course with nothing graded yet reports a null grade, not an empty string.
+    assert grades[1].grade == ""
+
+
+@respx.mock
+def test_get_grade_items_returns_the_first_users_items(
+    client: MoodleClient, grade_items_payload: dict[str, Any]
+) -> None:
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(200, json=grade_items_payload),
+        ]
+    )
+
+    items = client.get_grade_items(101)
+
+    assert [i.itemname for i in items] == ["TP1", None, None]
+    assert items[0].gradeformatted == "10.00"
+
+
+@respx.mock
+def test_an_aggregate_grade_row_is_named_by_its_item_type(
+    client: MoodleClient, grade_items_payload: dict[str, Any]
+) -> None:
+    """A course-total or category row carries no itemname and no itemmodule: both null."""
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(200, json=grade_items_payload),
+        ]
+    )
+
+    items = client.get_grade_items(101)
+
+    assert [i.label for i in items] == ["TP1", "Category subtotal", "Course total"]
+    assert all(i.itemmodule is None for i in items[1:])
+    # A null feedback reaches a str field and must not raise.
+    assert items[-1].feedback == ""
+
+
+@respx.mock
+def test_get_grade_items_surfaces_missing_gradebook_permission(client: MoodleClient) -> None:
+    """A per-course setting, not a token-wide block: get_grade_overview is unaffected."""
+    respx.post(REST_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"userid": 63643, "functions": []}),
+            httpx.Response(
+                200,
+                json={
+                    "exception": "moodle_exception",
+                    "errorcode": "nopermissiontoviewgrades",
+                    "message": "No se pueden ver las calificaciones.",
+                },
+            ),
+        ]
+    )
+
+    with pytest.raises(MoodleAPIError) as excinfo:
+        client.get_grade_items(101)
+    assert excinfo.value.errorcode == "nopermissiontoviewgrades"
+
+
 # -- course resolution -----------------------------------------------------------
 
 

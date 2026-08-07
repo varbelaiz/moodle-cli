@@ -9,8 +9,9 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from html import unescape
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 class _Base(BaseModel):
@@ -44,6 +45,21 @@ def html_to_text(markup: str) -> str:
     stripped = _ANY_TAG.sub("", _BLOCK_TAG.sub("\n", markup))
     lines = (" ".join(line.split()) for line in unescape(stripped).split("\n"))
     return "\n".join(line for line in lines if line)
+
+
+def _default_if_null(default: Any) -> BeforeValidator:
+    """Read a null as "unset".
+
+    The campus sends ``null`` for an optional field instead of omitting it, so a plain
+    default never applies and a non-optional annotation raises before the caller sees the
+    response. Fields carrying a real absent/present distinction stay explicitly nullable.
+    """
+    return BeforeValidator(lambda value: default if value is None else value)
+
+
+_Text = Annotated[str, _default_if_null("")]
+_Epoch = Annotated[int, _default_if_null(0)]
+_Number = Annotated[float, _default_if_null(0.0)]
 
 
 class Course(_Base):
@@ -164,10 +180,10 @@ class Announcement(_Base):
 
     id: int
     courseid: int = 0
-    subject: str = ""
-    message: str = ""
-    userfullname: str = ""
-    created: int = 0
+    subject: _Text = ""
+    message: _Text = ""
+    userfullname: _Text = ""
+    created: _Epoch = 0
     numreplies: int = 0
     pinned: bool = False
 
@@ -188,6 +204,105 @@ class Forum(_Base):
     course: int
     type: str = ""
     name: str = ""
+
+
+class Assignment(_Base):
+    id: int
+    cmid: int = 0
+    course: int = 0
+    name: _Text = ""
+    duedate: _Epoch = 0
+    allowsubmissionsfromdate: _Epoch = 0
+    cutoffdate: _Epoch = 0
+    grade: _Number = 0
+
+    @property
+    def due_at(self) -> datetime | None:
+        return epoch_to_datetime(self.duedate)
+
+    @property
+    def scale_graded(self) -> bool:
+        """A negative ``grade`` is a scale id, not a maximum: -52 means "graded by scale 52".
+
+        The scale's name is not in this payload, so a caller can say the assignment is
+        scale-graded but not which scale; ``get_assignment_status`` resolves the awarded
+        value through ``gradefordisplay``.
+        """
+        return self.grade < 0
+
+    @property
+    def max_grade(self) -> float | None:
+        """Point maximum, or None when the assignment is scale-graded or ungraded."""
+        return self.grade if self.grade > 0 else None
+
+
+#: ``gradingstatus`` values meaning the student can see a grade.
+_GRADED_STATUSES = frozenset({"graded", "released"})
+
+
+class AssignmentStatus(_Base):
+    """Curated view of ``mod_assign_get_submission_status``.
+
+    The raw response nests submission data under plugin-specific shapes that vary with
+    which submission methods (file, online text, ...) the assignment enables. Rather than
+    model that whole tree, ``MoodleClient.get_assignment_status`` extracts the fields
+    below by hand.
+    """
+
+    status: str | None = None
+    gradingstatus: _Text = ""
+    grade: str | None = None
+    gradefordisplay: _Text = ""
+    extensionduedate: _Epoch = 0
+    submitted_files: list[str] = Field(default_factory=list)
+
+    @property
+    def submitted(self) -> bool:
+        return self.status == "submitted"
+
+    @property
+    def graded(self) -> bool:
+        """A course using a marking workflow says "released" where a plain one says "graded".
+
+        The other workflow states (in marking, ready for review, ...) are stages the
+        student cannot see a grade from, so they read as ungraded.
+        """
+        return self.gradingstatus in _GRADED_STATUSES
+
+    @property
+    def extension_due_at(self) -> datetime | None:
+        return epoch_to_datetime(self.extensionduedate)
+
+
+class CourseGrade(_Base):
+    courseid: int
+    grade: _Text = ""
+
+
+#: ``itemtype`` -> name for the rows Moodle sends with a null ``itemname``.
+_ITEM_TYPE_LABELS = {"course": "Course total", "category": "Category subtotal"}
+
+
+class GradeItem(_Base):
+    """A row in a course's per-item grade breakdown.
+
+    A category subtotal row carries no ``itemname`` and no ``itemmodule`` — both arrive
+    ``null`` rather than absent or empty. ``itemtype`` is what identifies such a row.
+    """
+
+    itemname: str | None = None
+    itemtype: str | None = None
+    itemmodule: str | None = None
+    graderaw: float | None = None
+    grademax: _Number = 0
+    gradeformatted: _Text = ""
+    percentageformatted: _Text = ""
+    feedback: _Text = ""
+
+    @property
+    def label(self) -> str:
+        """A name for the row, including the aggregate rows Moodle leaves unnamed."""
+        return self.itemname or _ITEM_TYPE_LABELS.get(self.itemtype or "", "-")
 
 
 class SiteInfo(_Base):

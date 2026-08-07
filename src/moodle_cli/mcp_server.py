@@ -29,6 +29,7 @@ from moodle_cli.downloads import (
     sanitize,
 )
 from moodle_cli.errors import MoodleError
+from moodle_cli.models import html_to_text
 from moodle_cli.search import search_contents
 
 View = Literal["all", "all-including-hidden", "in-progress", "future", "past", "starred", "hidden"]
@@ -41,6 +42,15 @@ def _open_client() -> tuple[MoodleClient, str]:
     config = load_config()
     token = resolve_token(config)
     return MoodleClient(config.base_url, token), token
+
+
+def _course_names(client: MoodleClient) -> dict[int, str]:
+    """Shortname per course id, for labelling rows that carry only an id.
+
+    Includes courses hidden from the dashboard: the grade and assignment endpoints answer
+    for every enrolment, so anything narrower leaves a bare id in the output.
+    """
+    return {c.id: c.shortname for c in client.list_courses(view="all-including-hidden")}
 
 
 @mcp.tool()
@@ -310,6 +320,113 @@ def get_course_announcements(course: str | None = None) -> list[dict[str, Any]]:
             "pinned": a.pinned,
         }
         for a in announcements
+    ]
+
+
+@mcp.tool()
+def get_assignments(course: str | None = None) -> list[dict[str, Any]]:
+    """List assignments and their due dates.
+
+    `course` accepts a numeric id or a shortname prefix; omit it to check every enrolled
+    course. Pass an assignment's `id` from this list to get_assignment_status for
+    submission and grading detail.
+
+    `max_grade` is null when `scale_graded` is true: the assignment is marked with a named
+    scale rather than out of a number of points, and this endpoint does not name the scale.
+    It is also null for an assignment that carries no grade at all.
+    """
+    client, _ = _open_client()
+    with client:
+        if course:
+            resolved = client.resolve_course(course)
+            course_names = {resolved.id: resolved.shortname}
+            assignments = client.get_assignments([resolved.id])
+        else:
+            course_names = _course_names(client)
+            assignments = client.get_assignments()
+
+    return [
+        {
+            "id": a.id,
+            "course": course_names.get(a.course, str(a.course)),
+            "name": a.name,
+            "due_at": a.due_at.date().isoformat() if a.due_at else None,
+            "max_grade": a.max_grade,
+            "scale_graded": a.scale_graded,
+        }
+        for a in assignments
+    ]
+
+
+@mcp.tool()
+def get_assignment_status(assignment_id: int) -> dict[str, Any]:
+    """Submission and grading status for one assignment.
+
+    `assignment_id` is the `id` from get_assignments — not a course-module id, which
+    this call rejects.
+
+    `grade` is the raw value to compute with; `grade_display` is how the campus renders it,
+    which is the only form that names a scale grade such as "Aprobado".
+    """
+    client, _ = _open_client()
+    with client:
+        status = client.get_assignment_status(assignment_id)
+
+    return {
+        "submitted": status.submitted,
+        "submission_status": status.status,
+        "submitted_files": status.submitted_files,
+        "graded": status.graded,
+        "grade": status.grade,
+        "grade_display": status.gradefordisplay,
+        "extension_due_at": (
+            status.extension_due_at.date().isoformat() if status.extension_due_at else None
+        ),
+    }
+
+
+@mcp.tool()
+def get_grade_summary() -> list[dict[str, Any]]:
+    """Course-level grade summary across every enrolled course.
+
+    Works even for a course whose gradebook is not open to students. For a per-item
+    breakdown of one course — individual assignments, quizzes, etc. — use get_grades.
+    """
+    client, _ = _open_client()
+    with client:
+        course_names = _course_names(client)
+        overview = client.get_grade_overview()
+
+    return [
+        {"course": course_names.get(g.courseid, str(g.courseid)), "grade": g.grade}
+        for g in overview
+    ]
+
+
+@mcp.tool()
+def get_grades(course: str) -> list[dict[str, Any]]:
+    """Per-item grade breakdown for one course: assignments, quizzes, etc.
+
+    Raises if the instructor has not opened the gradebook to students in this course;
+    get_grade_summary still works in that case, just without the per-item detail.
+
+    Aggregate rows are included: `item` reads "Course total" or "Category subtotal" for the
+    rows Moodle sends unnamed.
+    """
+    client, _ = _open_client()
+    with client:
+        resolved = client.resolve_course(course)
+        items = client.get_grade_items(resolved.id)
+
+    return [
+        {
+            "item": item.label,
+            "grade": item.gradeformatted,
+            "max": item.grademax,
+            "percentage": item.percentageformatted,
+            "feedback": html_to_text(item.feedback),
+        }
+        for item in items
     ]
 
 

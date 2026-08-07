@@ -274,7 +274,7 @@ def test_api_error_is_reported_cleanly(courses_payload: dict[str, Any]) -> None:
     assert "invalidtoken" in result.output
 
 
-# -- links, announcements ---------------------------------------------------------
+# -- links, announcements, assignments and grades ---------------------------------
 
 
 @respx.mock
@@ -400,3 +400,243 @@ def test_announcements_report_nothing_for_a_course_whose_forums_are_all_general(
 
     assert result.exit_code == 0
     assert "No announcements" in result.output
+
+
+@respx.mock
+def test_assignments_lists_due_dates(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    result = runner.invoke(app, ["course", "assignments", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "Actividad semana 1" in result.output
+    assert "40393" in result.output
+    assert "2026-03-11" in result.output
+
+
+@respx.mock
+def test_a_scale_graded_assignment_shows_no_numeric_maximum(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    """A negative grade names a scale; printed as a number it reads as a maximum of -52."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    result = runner.invoke(app, ["course", "assignments", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "-52" not in result.output
+    assert "scale" in result.output
+
+
+@respx.mock
+def test_courses_assignments_spans_every_course_by_due_date(
+    courses_payload: dict[str, Any], assignments_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_assign_get_assignments=assignments_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "assignments"])
+
+    assert result.exit_code == 0
+    assert "IOS460 - 123246" in result.output
+    # The earlier deadline comes first, whatever order the campus listed them in.
+    assert result.output.index("2026-02-25") < result.output.index("2026-03-11")
+
+
+@respx.mock
+def test_assignment_status_decodes_the_grade_and_lists_submitted_files(
+    submission_status_payload: dict[str, Any],
+) -> None:
+    route_by_function(mod_assign_get_submission_status=submission_status_payload)
+
+    result = runner.invoke(app, ["course", "assignment-status", "40393"])
+
+    assert result.exit_code == 0
+    assert "submitted: yes" in result.output
+    assert "graded: yes" in result.output
+    assert "90.00\xa0/\xa0100.00" in result.output  # &nbsp; decoded to U+00A0, not literal
+    assert "Entrega - Semana 1.pdf" in result.output
+
+
+@respx.mock
+def test_a_null_optional_field_fails_as_a_message_not_a_traceback(
+    submission_status_payload: dict[str, Any],
+) -> None:
+    """A null in an optional field must not reach the user as a validation traceback."""
+    submission_status_payload["lastattempt"].update(gradingstatus=None, extensionduedate=None)
+    submission_status_payload["feedback"]["gradefordisplay"] = None
+    route_by_function(mod_assign_get_submission_status=submission_status_payload)
+
+    result = runner.invoke(app, ["course", "assignment-status", "40393"])
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert "graded: no" in result.output
+
+
+@respx.mock
+def test_an_extension_date_reads_in_the_same_zone_as_every_other_date(
+    submission_status_payload: dict[str, Any],
+) -> None:
+    """2026-03-12 01:00Z is still the 11th locally, which is the day the campus shows."""
+    submission_status_payload["lastattempt"]["extensionduedate"] = 1773277200
+    route_by_function(mod_assign_get_submission_status=submission_status_payload)
+
+    result = runner.invoke(app, ["course", "assignment-status", "40393"])
+
+    assert result.exit_code == 0
+    assert "extension until: 2026-03-11" in result.output
+
+
+@respx.mock
+def test_courses_grades_shows_the_summary_across_courses(
+    courses_payload: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "grades"])
+
+    assert result.exit_code == 0
+    assert "IOS460 - 123246" in result.output
+    assert "85.00" in result.output
+
+
+@respx.mock
+def test_a_course_hidden_from_the_dashboard_is_still_named(
+    courses_payload: dict[str, Any],
+    hidden_course: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    """The overview covers every enrolment, so a narrower course lookup leaves a bare id."""
+    grades_overview_payload["grades"].append({"courseid": 104, "grade": "70.00"})
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=lambda body: (
+            {"courses": [*courses_payload["courses"], hidden_course]}
+            if "classification=allincludinghidden" in body
+            else courses_payload
+        ),
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "grades"])
+
+    assert result.exit_code == 0
+    assert "I204 - 101313" in result.output
+    assert "104" not in result.output
+
+
+@respx.mock
+def test_a_shortname_with_brackets_survives_the_table(
+    courses_payload: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    """Server-controlled text is data, not Rich markup: an unescaped [tag] is swallowed."""
+    courses_payload["courses"][0]["shortname"] = "IOS460 [grupo 2]"
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "grades"])
+
+    assert result.exit_code == 0
+    assert "IOS460 [grupo 2]" in result.output
+
+
+@respx.mock
+def test_a_single_course_is_counted_in_the_singular(
+    courses_payload: dict[str, Any],
+    grades_overview_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    grades_overview_payload["grades"] = grades_overview_payload["grades"][:1]
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_overview_get_course_grades=grades_overview_payload,
+    )
+
+    result = runner.invoke(app, ["courses", "grades"])
+
+    assert result.exit_code == 0
+    assert "Grade summary (1 course)" in result.output
+
+
+@respx.mock
+def test_course_grades_shows_the_per_item_breakdown(
+    courses_payload: dict[str, Any],
+    grade_items_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items=grade_items_payload,
+    )
+
+    result = runner.invoke(app, ["course", "grades", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "TP1" in result.output
+    assert "10.00" in result.output
+
+
+@respx.mock
+def test_an_aggregate_grade_row_is_named_by_its_item_type(
+    courses_payload: dict[str, Any],
+    grade_items_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    """The course total arrives with a null itemname; rendered as "-" it reads as blank."""
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items=grade_items_payload,
+    )
+
+    result = runner.invoke(app, ["course", "grades", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "Course total" in result.output
+    assert "Category subtotal" in result.output
+
+
+@respx.mock
+def test_course_grades_fails_loudly_without_gradebook_permission(
+    courses_payload: dict[str, Any],
+    site_info_payload: dict[str, Any],
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_webservice_get_site_info=site_info_payload,
+        gradereport_user_get_grade_items={
+            "exception": "moodle_exception",
+            "errorcode": "nopermissiontoviewgrades",
+            "message": "No se pueden ver las calificaciones.",
+        },
+    )
+
+    result = runner.invoke(app, ["course", "grades", "IOS460"])
+
+    assert result.exit_code == 1
+    assert "nopermissiontoviewgrades" in result.output

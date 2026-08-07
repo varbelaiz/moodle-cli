@@ -8,6 +8,7 @@ without committing real classmates' names or email addresses to the repository.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -64,10 +65,45 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
         monkeypatch.delenv(var, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def fixed_timezone(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Pin the zone so a date assertion says the same thing on every machine.
+
+    Dates are rendered in local time, so without this the expected day depends on where
+    the suite runs. The campus's own zone is the one the output has to read correctly in,
+    and being off UTC is what keeps a test able to tell the two apart.
+    """
+    monkeypatch.setenv("TZ", "America/Argentina/Buenos_Aires")
+    time.tzset()
+    try:
+        yield
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 @pytest.fixture
 def courses_payload() -> dict[str, Any]:
     payload: dict[str, Any] = load_fixture("courses.json")
     return payload
+
+
+@pytest.fixture
+def hidden_course() -> dict[str, Any]:
+    """A course the dashboard filters out; only the all-including-hidden view returns it."""
+    return {
+        "id": 104,
+        "fullname": "I204 - Sistemas Operativos (grupo 1) G:1 Teó 1 - 1er. Semestre 2025",
+        "shortname": "I204 - 101313",
+        "startdate": 1736910000,
+        "enddate": 0,
+        "visible": True,
+        "viewurl": f"{BASE_URL}/course/view.php?id=104",
+        "progress": None,
+        "isfavourite": False,
+        "hidden": True,
+        "coursecategory": "Ingeniería en Inteligencia Artificial",
+    }
 
 
 @pytest.fixture
@@ -95,6 +131,35 @@ def discussions_payload() -> dict[str, Any]:
 
 
 @pytest.fixture
+def assignments_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("assignments.json")
+    return payload
+
+
+@pytest.fixture
+def submission_status_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("submission_status.json")
+    return payload
+
+
+@pytest.fixture
+def grades_overview_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("grades_overview.json")
+    return payload
+
+
+@pytest.fixture
+def grade_items_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = load_fixture("grade_items.json")
+    return payload
+
+
+@pytest.fixture
+def site_info_payload() -> dict[str, Any]:
+    return {"userid": 63643, "functions": []}
+
+
+@pytest.fixture
 def tmp_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.chdir(tmp_path)
     yield tmp_path
@@ -112,13 +177,17 @@ def configured_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def route_by_function(**payloads: Any) -> respx.Route:
-    """Dispatch the single REST endpoint on the wsfunction being requested."""
+    """Dispatch the single REST endpoint on the wsfunction being requested.
+
+    A payload may be a callable taking the encoded request body, for a function whose
+    answer depends on the parameters it was called with.
+    """
 
     def responder(request: httpx.Request) -> httpx.Response:
         body = request.content.decode()
         for function, payload in payloads.items():
             if f"wsfunction={function}" in body:
-                return httpx.Response(200, json=payload)
+                return httpx.Response(200, json=payload(body) if callable(payload) else payload)
         return httpx.Response(200, json={"errorcode": "unmocked", "message": body})
 
     return respx.post(REST_URL).mock(side_effect=responder)

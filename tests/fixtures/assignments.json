@@ -1,0 +1,33 @@
+{
+  "courses": [
+    {
+      "id": 101,
+      "fullname": "IOS460 - 123246",
+      "shortname": "IOS460 - 123246",
+      "timemodified": 1783098164,
+      "assignments": [
+        {
+          "id": 40393,
+          "cmid": 862148,
+          "course": 101,
+          "name": "Actividad semana 1",
+          "duedate": 1773244800,
+          "allowsubmissionsfromdate": 1772852400,
+          "cutoffdate": 0,
+          "grade": 100
+        },
+        {
+          "id": 40279,
+          "cmid": 862031,
+          "course": 101,
+          "name": "Trabajo Práctico 1",
+          "duedate": 1772035200,
+          "allowsubmissionsfromdate": 0,
+          "cutoffdate": 0,
+          "grade": -52
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

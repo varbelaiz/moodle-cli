@@ -29,14 +29,23 @@ from moodle_cli.downloads import (
     sanitize,
 )
 from moodle_cli.errors import MoodleError
-from moodle_cli.models import Announcement, Participant, Section, epoch_to_datetime
+from moodle_cli.models import (
+    Announcement,
+    Assignment,
+    Participant,
+    Section,
+    epoch_to_datetime,
+)
 from moodle_cli.search import SearchHit, search_contents
 
 console = Console()
 err_console = Console(stderr=True)
 
 app = typer.Typer(
-    help="Access a Moodle campus: courses, contents, downloads, participants and announcements.",
+    help=(
+        "Access a Moodle campus: courses, contents, downloads, participants, "
+        "announcements, assignments and grades."
+    ),
     no_args_is_help=True,
     add_completion=False,
 )
@@ -228,6 +237,83 @@ def courses_list(
             "*" if course.isfavourite else "",
         )
     console.print(table)
+
+
+@courses_app.command("grades")
+@handle_errors
+def courses_grades(as_json: JsonOpt = False) -> None:
+    """Show a grade summary across every enrolled course.
+
+    Works even for a course whose gradebook is not open to students. For a per-item
+    breakdown of one course, use `course grades` instead.
+    """
+    with _client() as client:
+        course_names = _course_names(client)
+        overview = client.get_grade_overview()
+
+    if as_json:
+        _emit_json(
+            [
+                {"course": course_names.get(g.courseid, str(g.courseid)), "grade": g.grade}
+                for g in overview
+            ]
+        )
+        return
+
+    table = Table(title=f"Grade summary ({len(overview)} {_plural(len(overview), 'course')})")
+    table.add_column("course")
+    table.add_column("grade", justify="right")
+    for g in overview:
+        table.add_row(escape(course_names.get(g.courseid, str(g.courseid))), g.grade or "-")
+    console.print(table)
+
+
+@courses_app.command("assignments")
+@handle_errors
+def courses_assignments(as_json: JsonOpt = False) -> None:
+    """List assignments and due dates across every enrolled course.
+
+    Ordered by due date, undated last, so the next deadline is at the top. For one course,
+    use `course assignments`.
+    """
+    with _client() as client:
+        course_names = _course_names(client)
+        assignments = sorted(client.get_assignments(), key=_by_due_date)
+
+    if as_json:
+        _emit_json([a.model_dump(mode="json") for a in assignments])
+        return
+
+    count = len(assignments)
+    table = Table(title=f"{count} {_plural(count, 'assignment')}")
+    table.add_column("id", justify="right", style="dim")
+    table.add_column("course", no_wrap=True)
+    table.add_column("name")
+    table.add_column("due", justify="right", style="dim")
+    table.add_column("grade", justify="right", style="dim")
+    for a in assignments:
+        table.add_row(
+            str(a.id),
+            escape(course_names.get(a.course, str(a.course))),
+            escape(a.name),
+            _format_epoch(a.duedate),
+            _grade_cell(a),
+        )
+    console.print(table)
+
+
+def _by_due_date(assignment: Assignment) -> tuple[bool, int]:
+    """Sort undated assignments after dated ones: 0 means "no due date", not "the epoch"."""
+    return (assignment.duedate == 0, assignment.duedate)
+
+
+def _course_names(client: MoodleClient) -> dict[int, str]:
+    """Shortname per course id, for labelling rows that carry only an id.
+
+    Includes courses hidden from the dashboard: the grade and assignment endpoints answer
+    for every enrolment, so anything narrower leaves a bare id in the output.
+    """
+    return {c.id: c.shortname for c in client.list_courses(view="all-including-hidden")}
 
 
 def _short_name(fullname: str, shortname: str) -> str:
@@ -569,6 +655,101 @@ def _announcement_payload(announcement: Announcement, course: str) -> dict[str, 
         "replies": announcement.numreplies,
         "pinned": announcement.pinned,
     }
+
+
+@course_app.command("assignments")
+@handle_errors
+def course_assignments(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """List a course's assignments and due dates.
+
+    For every course at once, use `courses assignments`.
+    """
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        assignments = client.get_assignments([resolved.id])
+
+    if as_json:
+        _emit_json([a.model_dump(mode="json") for a in assignments])
+        return
+
+    count = len(assignments)
+    table = Table(title=f"{count} {_plural(count, 'assignment')} in {escape(resolved.shortname)}")
+    table.add_column("id", justify="right", style="dim")
+    table.add_column("name")
+    table.add_column("due", justify="right", style="dim")
+    table.add_column("grade", justify="right", style="dim")
+    for a in assignments:
+        table.add_row(str(a.id), escape(a.name), _format_epoch(a.duedate), _grade_cell(a))
+    console.print(table)
+
+
+def _grade_cell(assignment: Assignment) -> str:
+    """The grade column holds a point maximum, and a scale-graded assignment has none.
+
+    Moodle encodes "graded by scale N" as a negative ``grade``; printed as a number it
+    reads as a maximum of -N. The scale's name is not in this payload, so the column can
+    only say which kind of grading applies.
+    """
+    if assignment.scale_graded:
+        return "scale"
+    return f"{assignment.max_grade:g}" if assignment.max_grade else "-"
+
+
+AssignmentIdArg = Annotated[
+    int, typer.Argument(help="Assignment id, as shown by `course assignments`.")
+]
+
+
+@course_app.command("assignment-status")
+@handle_errors
+def course_assignment_status(assignment_id: AssignmentIdArg, as_json: JsonOpt = False) -> None:
+    """Show submission and grading status for one assignment.
+
+    `assignment_id` is the id from `course assignments` — not a course-module id, which
+    this call rejects.
+    """
+    with _client() as client:
+        status = client.get_assignment_status(assignment_id)
+
+    if as_json:
+        _emit_json(status.model_dump(mode="json"))
+        return
+
+    console.print(f"submitted: {'yes' if status.submitted else 'no'} ({status.status or '-'})")
+    console.print(f"graded: {'yes' if status.graded else 'no'}")
+    if status.gradefordisplay:
+        console.print(f"grade: {escape(status.gradefordisplay)}")
+    if status.submitted_files:
+        console.print("files:")
+        for name in status.submitted_files:
+            console.print(f"  {escape(name)}")
+    if status.extensionduedate:
+        console.print(f"extension until: {_format_epoch(status.extensionduedate)}")
+
+
+@course_app.command("grades")
+@handle_errors
+def course_grades(course: CourseArg, as_json: JsonOpt = False) -> None:
+    """Show the per-item grade breakdown for one course: assignments, quizzes, etc.
+
+    Fails if the instructor has not opened the gradebook to students in this course;
+    `courses grades` still works in that case, just without per-item detail.
+    """
+    with _client() as client:
+        resolved = client.resolve_course(course)
+        items = client.get_grade_items(resolved.id)
+
+    if as_json:
+        _emit_json([i.model_dump(mode="json") for i in items])
+        return
+
+    table = Table(title=f"Grades for {resolved.shortname}")
+    table.add_column("item")
+    table.add_column("grade", justify="right")
+    table.add_column("max", justify="right", style="dim")
+    for i in items:
+        table.add_row(escape(i.label), i.gradeformatted or "-", str(i.grademax))
+    console.print(table)
 
 
 def main() -> None:

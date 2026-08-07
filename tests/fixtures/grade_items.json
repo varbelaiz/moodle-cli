@@ -1,0 +1,41 @@
+{
+  "usergrades": [
+    {
+      "courseid": 101,
+      "userid": 1,
+      "gradeitems": [
+        {
+          "itemname": "TP1",
+          "itemtype": "mod",
+          "itemmodule": "assign",
+          "graderaw": 10,
+          "grademax": 10,
+          "gradeformatted": "10.00",
+          "percentageformatted": "100.00 %",
+          "feedback": "<p>Buen trabajo.</p><p>Revisar la sección 3.</p>"
+        },
+        {
+          "itemname": null,
+          "itemtype": "category",
+          "itemmodule": null,
+          "graderaw": null,
+          "grademax": 20,
+          "gradeformatted": "18.00",
+          "percentageformatted": "90.00 %",
+          "feedback": null
+        },
+        {
+          "itemname": null,
+          "itemtype": "course",
+          "itemmodule": null,
+          "graderaw": 85,
+          "grademax": 100,
+          "gradeformatted": "85.00",
+          "percentageformatted": "85.00 %",
+          "feedback": null
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
