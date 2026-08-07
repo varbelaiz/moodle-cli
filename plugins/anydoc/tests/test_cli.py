@@ -1,13 +1,18 @@
-"""Tests for `moodle anydoc convert`."""
+"""Tests for `moodle anydoc convert` and `moodle anydoc fetch`."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from moodle_cli_anydoc import cli as cli_module
 from moodle_cli_anydoc.cli import app
+from moodle_cli_anydoc.convert import Converted
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+# -- convert -----------------------------------------------------------------------
 
 
 def test_convert_command_writes_markdown_and_reports_ok(tmp_path: Path) -> None:
@@ -37,3 +42,49 @@ def test_convert_command_keeps_going_after_one_failure(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert (tmp_path / "grades.csv.md").exists()
+
+
+# -- fetch -------------------------------------------------------------------------
+
+
+def test_fetch_command_reports_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    converted = Converted(tmp_path / "grades.csv", "| 1 |", tmp_path / "grades.csv.md")
+    monkeypatch.setattr(
+        cli_module,
+        "fetch_and_convert",
+        lambda course, filename, section=None: converted,
+    )
+
+    result = runner.invoke(app, ["fetch", "IOS460", "grades.csv"])
+
+    assert result.exit_code == 0
+    assert "ok" in result.stdout
+
+
+def test_fetch_command_reports_a_clean_error_on_no_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_not_found(course: str, filename: str, section: int | None = None) -> Converted:
+        raise ValueError(f"{filename!r}: no such file in {course}")
+
+    monkeypatch.setattr(cli_module, "fetch_and_convert", raise_not_found)
+
+    result = runner.invoke(app, ["fetch", "IOS460", "missing.pdf"])
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
+
+
+def test_fetch_command_passes_the_section_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_fetch_and_convert(course: str, filename: str, section: int | None = None) -> Converted:
+        seen["section"] = section
+        return Converted(Path("a.csv"), "ok", Path("a.csv.md"))
+
+    monkeypatch.setattr(cli_module, "fetch_and_convert", fake_fetch_and_convert)
+
+    result = runner.invoke(app, ["fetch", "IOS460", "notes.csv", "--section", "2"])
+
+    assert result.exit_code == 0
+    assert seen["section"] == 2

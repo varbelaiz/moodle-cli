@@ -1,9 +1,8 @@
 # moodle-cli-anydoc
 
-Converts a course file already on disk to GitHub-Flavored Markdown, via
+Converts a course document to GitHub-Flavored Markdown, via
 [anydoc](https://github.com/firecrawl/anydoc): Word, PowerPoint, Excel, OpenDocument, RTF,
-EPUB, CSV and PDF. Purely local — this plugin never reaches the campus, so it needs no
-token and no client.
+EPUB, CSV and PDF.
 
 ```bash
 moodle plugins install anydoc
@@ -11,6 +10,16 @@ moodle plugins install anydoc
 
 See [docs/plugins.md](../../docs/plugins.md) in the core repository for how plugins are
 installed and discovered in general.
+
+Two capabilities, split by what each is for rather than just by input shape:
+
+- **`convert`** transforms a batch of files already on disk. Purely local — no client, no
+  token, no network. Returns paths, not content: this is for persisting output (a vault,
+  a course archive), not reading any one file back.
+- **`fetch`** reaches the campus itself for a single named file, going through the same
+  download machinery `moodle course download` uses — a file already on disk at the
+  expected size is reused rather than re-fetched. Returns the markdown content inline, so
+  reading one course document takes one call instead of a download-then-convert dance.
 
 ## `moodle anydoc convert`
 
@@ -34,16 +43,45 @@ ok    IOS460/Programa.pdf -> IOS460/Programa.pdf.md
 FAIL  IOS460/scan.pdf: encrypted or password-protected
 ```
 
-## `anydoc_convert`
+## `anydoc_convert_to_markdown`
 
-MCP tool. Same conversion, for an agent reading a course document already on disk.
+MCP tool. Same conversion, for an agent building up a batch of files already on disk —
+for example, exporting a course into an Obsidian vault.
 
 ```json
-{"path": "IOS460/Programa.pdf"}
+{"paths": ["IOS460/Programa.pdf", "IOS460/Semana 1/slides.pptx"]}
+```
+
+Returns a path-only manifest, one entry per input, in order:
+
+```json
+[
+  {"path": "IOS460/Programa.pdf", "markdown_path": "IOS460/Programa.pdf.md", "status": "converted"},
+  {"path": "IOS460/Semana 1/slides.pptx", "status": "error", "error": "...: encrypted or password-protected"}
+]
+```
+
+## `moodle anydoc fetch`
+
+```
+moodle anydoc fetch COURSE FILENAME [--section N]
+```
+
+Fetches one file by course and exact filename (as shown by `moodle course contents`),
+converts it, and writes `<name>.md` alongside it. `--section` disambiguates the rare case
+where a duplicated activity produces two files under the same name with different sizes.
+
+## `anydoc_get_markdown`
+
+MCP tool. Same fetch, for an agent asking about one course document — a slide, a handout
+— without a prior download step.
+
+```json
+{"course": "IOS460", "filename": "Programa.pdf"}
 ```
 
 Writes `<path>.md` and returns both the file it wrote and the markdown itself, so reading
-a course document takes one call instead of a convert-then-read round trip:
+a course document takes one call:
 
 ```json
 {
@@ -55,7 +93,9 @@ a course document takes one call instead of a convert-then-read round trip:
 ```
 
 `markdown` is capped at 20,000 characters. `truncated` is true when the file converted to
-more than that — read `markdown_path` for the rest, the same way `download_course_files`
-expects the caller to read a large file from disk rather than through the tool response.
+more than that — an agent with filesystem access reads `markdown_path` directly for the
+rest, the same way `download_course_files` expects a large file to be read from disk
+rather than through the tool response.
 
-Raises if `path` does not exist or cannot be converted.
+Raises if `course` or `filename` do not resolve, if `filename` matches more than one file
+in the course (see `section`), or if the file cannot be converted.
