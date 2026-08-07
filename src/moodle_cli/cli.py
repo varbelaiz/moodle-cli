@@ -6,7 +6,6 @@ import functools
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, ParamSpec, TypeVar
@@ -29,7 +28,7 @@ from moodle_cli.downloads import (
     sanitize,
 )
 from moodle_cli.errors import MoodleError
-from moodle_cli.models import Participant, Section
+from moodle_cli.models import Participant, Section, epoch_to_datetime
 from moodle_cli.search import SearchHit, search_contents
 
 console = Console()
@@ -108,8 +107,14 @@ def _human_size(size: int) -> str:
     return f"{value:.1f} GB"
 
 
-def _format_epoch(value: int) -> str:
-    return datetime.fromtimestamp(value).strftime("%Y-%m-%d") if value else "-"
+def _format_epoch(value: int, fmt: str = "%Y-%m-%d") -> str:
+    """Render a Moodle timestamp, going through the one shared conversion.
+
+    Converting here rather than from the raw epoch is what keeps this surface and the MCP
+    server on the same calendar day for an evening event.
+    """
+    moment = epoch_to_datetime(value)
+    return moment.strftime(fmt) if moment else "-"
 
 
 def _plural(count: int, noun: str) -> str:
@@ -118,7 +123,7 @@ def _plural(count: int, noun: str) -> str:
 
 def _format_year(value: int) -> str:
     """Start year is the only recency signal available: no course here sets an end date."""
-    return datetime.fromtimestamp(value).strftime("%Y") if value else "-"
+    return _format_epoch(value, "%Y")
 
 
 # -- auth ------------------------------------------------------------------------

@@ -1,8 +1,10 @@
-"""Model behaviour that belongs to no single endpoint: HTML conversion."""
+"""Model behaviour that belongs to no single endpoint: HTML conversion, timestamps."""
 
 from __future__ import annotations
 
-from moodle_cli.models import html_to_text
+from datetime import UTC, datetime
+
+from moodle_cli.models import epoch_to_datetime, html_to_text
 
 # Two paragraphs, a line break, a list and two entities: everything a real forum post
 # throws at the converter, in one string.
@@ -34,3 +36,18 @@ def test_html_to_text_treats_a_non_breaking_space_as_a_space() -> None:
     assert html_to_text("<p>Buenas&nbsp;tardes,&nbsp;&nbsp;desocult&eacute; el material.</p>") == (
         "Buenas tardes, desoculté el material."
     )
+
+
+def test_epoch_to_datetime_resolves_to_local_wall_clock() -> None:
+    """The single conversion point, so no two surfaces disagree on the day of an event."""
+    moment = epoch_to_datetime(1783108601)
+
+    assert moment == datetime.fromtimestamp(1783108601, tz=UTC)
+    assert moment is not None
+    assert moment.strftime("%Y-%m-%d %H:%M") == (
+        datetime.fromtimestamp(1783108601).strftime("%Y-%m-%d %H:%M")
+    )
+
+
+def test_epoch_to_datetime_reads_zero_as_unset() -> None:
+    assert epoch_to_datetime(0) is None

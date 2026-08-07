@@ -17,9 +17,14 @@ class _Base(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-def _epoch_to_datetime(value: int) -> datetime | None:
-    """Moodle uses 0, not null, for unset timestamps."""
-    return datetime.fromtimestamp(value, tz=UTC) if value else None
+def epoch_to_datetime(value: int) -> datetime | None:
+    """The one epoch conversion, resolved to the reader's local zone.
+
+    Moodle uses 0, not null, for unset timestamps. Every surface converts here: a second
+    conversion pinned to another zone reports a different calendar day for the same
+    evening event, and the campus web UI shows local time.
+    """
+    return datetime.fromtimestamp(value, tz=UTC).astimezone() if value else None
 
 
 #: Tags that end a line of prose. Everything else is stripped without a separator.
@@ -57,12 +62,12 @@ class Course(_Base):
 
     @property
     def started_at(self) -> datetime | None:
-        return _epoch_to_datetime(self.startdate)
+        return epoch_to_datetime(self.startdate)
 
     @property
     def ended_at(self) -> datetime | None:
         """None on this campus: course end dates are never configured."""
-        return _epoch_to_datetime(self.enddate)
+        return epoch_to_datetime(self.enddate)
 
 
 class CourseFile(_Base):
@@ -147,7 +152,7 @@ class Participant(_Base):
 
     @property
     def last_course_access(self) -> datetime | None:
-        return _epoch_to_datetime(self.lastcourseaccess)
+        return epoch_to_datetime(self.lastcourseaccess)
 
 
 class SiteInfo(_Base):
