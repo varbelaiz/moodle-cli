@@ -1,8 +1,8 @@
 # moodle-cli
 
 Command line client and MCP server for a Moodle campus. Lists your courses, reads their
-contents, downloads the material, and shows who is enrolled — over Moodle's web-service
-API, with no browser and no HTML scraping.
+contents and announcements, downloads the material, and shows who is enrolled — over
+Moodle's web-service API, with no browser and no HTML scraping.
 
 Works with any Moodle instance that has web services and the mobile service enabled.
 
@@ -15,6 +15,7 @@ Works with any Moodle instance that has web services and the mobile service enab
   - [`moodle course contents`](#moodle-course-contents)
   - [`moodle course download`](#moodle-course-download)
   - [`moodle course participants`](#moodle-course-participants)
+  - [`moodle course announcements`](#moodle-course-announcements)
 - [MCP server](#mcp-server)
 - [Configuration](#configuration)
 - [Exit codes](#exit-codes)
@@ -216,6 +217,27 @@ $ moodle course participants IOS460 --role student
 └──────────────────────┴──────────┴─────────────┘
 ```
 
+### `moodle course announcements`
+
+Lists posts from a course's news forum, newest first.
+
+| Option | Description |
+| --- | --- |
+| `--json` | JSON output. |
+
+```console
+$ moodle course announcements I101
+Cambio de aula para la clase del jueves (pinned)
+  2026-04-16 18:30 — Grace Hopper
+  Estimados,
+  La clase del jueves se dicta en el aula S004.
+```
+
+Only a forum Moodle marks as `"news"` carries announcements; a course's regular discussion
+forums are not included, and a course without a news forum prints nothing. Posts are HTML
+on the wire and are printed as text, one line per paragraph or list item. `--json` carries
+that same text under `message`, plus a `posted_at` timestamp that keeps the time of day.
+
 ## MCP server
 
 Exposes the same functionality to an agent over stdio.
@@ -231,6 +253,7 @@ claude mcp add moodle -- uv run --project /path/to/moodle-cli moodle-mcp
 | `search_courses` | `query` |
 | `download_course_files` | `course`, `output_dir`, `sections[]`, `module_types[]`, `files[]`, `match[]`, `dry_run` |
 | `list_participants` | `course`, `role`, `include_emails` (default `false`) |
+| `get_course_announcements` | `course` (default: every enrolled course) |
 
 `download_course_files` writes to disk and returns a manifest of paths, sizes and per-file
 status. It never returns file contents: a single course can hold hundreds of megabytes, and
@@ -240,7 +263,8 @@ the agent can read whatever it needs from disk afterwards. Emails are opt-in her
 recorded-class or external-site link) — the destination is informational, not something
 any tool downloads. `search_courses` is `courses search`: one call over every enrolled
 course, each result naming what it matched under `match` and carrying the `section_number`
-that `download_course_files` selects by.
+that `download_course_files` selects by. `get_course_announcements` returns the same fields
+as `course announcements --json`, so a consumer can learn the shape from either surface.
 
 ## Configuration
 
