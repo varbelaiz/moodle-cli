@@ -1,8 +1,8 @@
-"""Convert course files already on disk to markdown, via firecrawl-anydoc.
+"""Convert course files to markdown, via firecrawl-anydoc.
 
-Purely local: nothing here reaches the campus, so this plugin needs no client and no
-token. It operates on files `course download` (or `download_course_files`) already put
-on disk.
+Two capabilities, deliberately split: converting a batch of files already on disk needs
+no client and no token, while fetching one course file by name reaches the campus itself
+through the same client and download machinery `course download` uses.
 """
 
 from __future__ import annotations
@@ -28,6 +28,6 @@ class AnydocPlugin(Plugin):
         return app
 
     def tools(self) -> Sequence[Callable[..., Any]]:
-        from moodle_cli_anydoc.tools import convert
+        from moodle_cli_anydoc.tools import convert_to_markdown, get_markdown
 
-        return (convert,)
+        return (convert_to_markdown, get_markdown)
