@@ -18,9 +18,7 @@ from typing import Any, Literal
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-from moodle_cli.auth import resolve_token
 from moodle_cli.client import MoodleClient
-from moodle_cli.config import load_config
 from moodle_cli.downloads import (
     DownloadStatus,
     download_file,
@@ -30,18 +28,14 @@ from moodle_cli.downloads import (
 )
 from moodle_cli.errors import MoodleError
 from moodle_cli.models import html_to_text
+from moodle_cli.plugins import register_tools
 from moodle_cli.search import search_contents
+from moodle_cli.session import open_client
 
 View = Literal["all", "all-including-hidden", "in-progress", "future", "past", "starred", "hidden"]
 Sort = Literal["name", "last-accessed"]
 
 mcp = FastMCP("moodle-campus")
-
-
-def _open_client() -> tuple[MoodleClient, str]:
-    config = load_config()
-    token = resolve_token(config)
-    return MoodleClient(config.base_url, token), token
 
 
 def _course_names(client: MoodleClient) -> dict[int, str]:
@@ -65,7 +59,7 @@ def list_courses(view: View = "all", sort: Sort = "name") -> list[dict[str, Any]
     bare date is read in whichever zone the tool runs in, which names the wrong day for
     anyone reading from a different zone than the campus.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         return [
             {
@@ -91,7 +85,7 @@ def get_course_contents(course: str) -> dict[str, Any]:
     Link entries (a "url" module's actual destination, e.g. a recorded-class or
     external-site link) are informational only — nothing downloads them.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         resolved = client.resolve_course(course)
         sections = client.get_course_contents(resolved.id)
@@ -143,7 +137,7 @@ def search_courses(query: str) -> dict[str, Any]:
 
     `truncated` is true when more matched than the response carries: narrow the query.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         return search_contents(client, query).as_payload()
 
@@ -171,10 +165,8 @@ def download_course_files(
 
     `output_dir` defaults to ./<course shortname>/. Set `dry_run` to preview the plan.
     """
-    config = load_config()
-    token = resolve_token(config)
-
-    with MoodleClient(config.base_url, token) as client:
+    with open_client() as client:
+        token = client.token
         resolved = client.resolve_course(course)
         contents = client.get_course_contents(resolved.id)
 
@@ -268,7 +260,7 @@ def list_participants(
     is: a bare date is read in whichever zone the tool runs in, so a late-evening access
     reads as the next day to anyone east of the campus.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         resolved = client.resolve_course(course)
         participants = client.get_participants(resolved.id)
@@ -303,7 +295,7 @@ def get_course_announcements(course: str | None = None) -> list[dict[str, Any]]:
     without a news forum returns nothing. `message` is plain text; `posted_at` keeps the
     time of day, which is what tells two posts of the same day apart.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         # The course list is fetched once and reused as both the sweep's scope and its
         # id -> shortname map; letting get_announcements enumerate again would double the
@@ -347,7 +339,7 @@ def get_assignments(course: str | None = None) -> list[dict[str, Any]]:
     and not a day: most fall at 23:59, where the date alone both hides how many hours are
     left and names the wrong day for anyone reading from a different zone than the campus.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         if course:
             resolved = client.resolve_course(course)
@@ -383,7 +375,7 @@ def get_assignment_status(assignment_id: int) -> dict[str, Any]:
     `extension_due_at` is a full timestamp carrying its UTC offset, for the same reason
     `due_at` is one in get_assignments: an extension is a deadline, not a day.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         status = client.get_assignment_status(assignment_id)
 
@@ -413,7 +405,7 @@ def get_quizzes(course: str | None = None) -> list[dict[str, Any]]:
     closes at a moment, and the date alone both hides how many hours are left and names the
     wrong day for anyone reading from a different zone than the campus.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         if course:
             resolved = client.resolve_course(course)
@@ -452,7 +444,7 @@ def get_quiz_status(quiz_id: int, course: str | None = None) -> dict[str, Any]:
     this the lookup sweeps every enrolment: checking a course's quizzes one by one pulls
     the whole campus once per quiz.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         course_id = client.resolve_course(course).id if course else None
         status = client.get_quiz_status(quiz_id, course_id=course_id)
@@ -474,7 +466,7 @@ def get_grade_summary() -> list[dict[str, Any]]:
     Works even for a course whose gradebook is not open to students. For a per-item
     breakdown of one course — individual assignments, quizzes, etc. — use get_grades.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         course_names = _course_names(client)
         overview = client.get_grade_overview()
@@ -495,7 +487,7 @@ def get_grades(course: str) -> list[dict[str, Any]]:
     Aggregate rows are included: `item` reads "Course total" or "Category subtotal" for the
     rows Moodle sends unnamed.
     """
-    client, _ = _open_client()
+    client = open_client()
     with client:
         resolved = client.resolve_course(course)
         items = client.get_grade_items(resolved.id)
@@ -510,6 +502,12 @@ def get_grades(course: str) -> list[dict[str, Any]]:
         }
         for item in items
     ]
+
+
+# After every core tool, so the core has already claimed its names: FastMCP keeps the first
+# registration of a name and only warns about a second. At import rather than in main(),
+# because the tests import the tool functions directly and never call main().
+register_tools(mcp)
 
 
 def main() -> None:
