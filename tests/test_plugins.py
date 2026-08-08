@@ -281,8 +281,16 @@ def test_an_umbrella_extra_is_not_read_as_a_plugin(monkeypatch: pytest.MonkeyPat
     assert plugins.extra_distributions() == {"anydoc": "moodle-cli-anydoc"}
 
 
-def test_the_catalog_is_empty_when_the_core_declares_no_plugin_extras() -> None:
-    """The state this release ships in: the machinery works with nothing to operate on."""
+def test_the_catalog_is_empty_when_the_core_declares_no_plugin_extras(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The machinery works with nothing to operate on.
+
+    Fakes the core's own metadata rather than reading it for real: this asserts a
+    property of `catalog()` itself, not of whatever this release happens to ship, and a
+    real official plugin's presence or absence in this checkout must not change it.
+    """
+    monkeypatch.setattr(plugins, "metadata", lambda name: SimpleNamespace(get_all=lambda key: []))
     plugins.reset()
 
     assert plugins.catalog() == ()

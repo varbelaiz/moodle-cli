@@ -1,9 +1,7 @@
 """Guards on how plugins are declared, read straight from the pyproject files.
 
 These read the source rather than installed metadata so a mistake fails in the pull request
-that introduces it, not months later when someone tries to install the package. Every one
-of them passes vacuously today: this release declares no plugins, and the point is that the
-first one to be declared wrongly cannot land quietly.
+that introduces it, not months later when someone tries to install the package.
 """
 
 from __future__ import annotations
@@ -12,8 +10,6 @@ import re
 import tomllib
 from pathlib import Path
 from typing import Any
-
-import pytest
 
 from moodle_cli.plugins import AGGREGATE_EXTRAS, CORE_DISTRIBUTION, ENTRY_POINT_GROUP
 
@@ -89,12 +85,12 @@ def test_every_plugin_declares_one_entry_point_named_for_its_extra() -> None:
         assert list(entry_points) == [directory]
 
 
-@pytest.mark.parametrize("bound", ["<", "=="])
-def test_every_plugin_pins_an_upper_bound_on_the_core(bound: str) -> None:
+def test_every_plugin_pins_an_upper_bound_on_the_core() -> None:
     """uv publishes a workspace member with an unbounded core dependency.
 
     Without a bound written by hand, the released plugin claims to work against every
-    future core release, including the one that changes the plugin contract.
+    future core release, including the one that changes the plugin contract. Either an
+    exclusive range ('<') or an exact pin ('==') counts -- a plugin picks one, not both.
     """
     for directory, manifest in _plugin_manifests():
         requirements = [
@@ -103,7 +99,7 @@ def test_every_plugin_pins_an_upper_bound_on_the_core(bound: str) -> None:
             if _name_of(requirement) == CORE_DISTRIBUTION
         ]
         assert requirements, f"{directory} does not depend on {CORE_DISTRIBUTION}"
-        assert any(bound in requirement for requirement in requirements), (
+        assert any(bound in requirement for requirement in requirements for bound in ("<", "==")), (
             f"{directory} does not bound {CORE_DISTRIBUTION} from above"
         )
 
