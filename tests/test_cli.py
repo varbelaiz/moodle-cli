@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 import respx
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from moodle_cli.cli import app
@@ -822,22 +823,19 @@ CORE_GROUPS = ("auth", "courses", "course", "plugins")
 def test_only_the_documented_commands_lack_json_output() -> None:
     """The README promises `--json` on every command that answers a question.
 
-    Checked through `--help` rather than by reading the source, so it holds whatever the
-    option is spelled as internally. Plugin groups are out of scope: their own docs make
-    their own promises.
+    Read off the command tree rather than out of `--help`: the rendered help is Rich's
+    to lay out, and how it wraps depends on the terminal it believes it has, so parsing
+    it makes this assert something different on a developer's machine than on a runner.
+    Plugin groups are out of scope; their own docs make their own promises.
     """
-    missing: set[tuple[str, str]] = set()
+    groups = get_command(app).commands  # type: ignore[attr-defined]
 
-    for group in CORE_GROUPS:
-        listing = runner.invoke(app, [group, "--help"])
-        assert listing.exit_code == 0, group
-        for line in listing.stdout.splitlines():
-            stripped = line.strip().lstrip("│").strip()
-            name = stripped.split(" ")[0] if stripped else ""
-            if not name or not name[0].isalpha() or name in {"Usage:", "Options", "Commands"}:
-                continue
-            command = runner.invoke(app, [group, name, "--help"])
-            if command.exit_code == 0 and "--json" not in command.stdout:
-                missing.add((group, name))
+    missing: set[tuple[str, str]] = set()
+    for group_name in CORE_GROUPS:
+        assert group_name in groups, f"{group_name} is not a command group"
+        for command_name, command in groups[group_name].commands.items():
+            flags = {opt for param in command.params for opt in param.opts}
+            if "--json" not in flags:
+                missing.add((group_name, command_name))
 
     assert missing == CORE_COMMANDS_WITHOUT_JSON
