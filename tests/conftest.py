@@ -8,6 +8,7 @@ without committing real classmates' names or email addresses to the repository.
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -19,6 +20,13 @@ import pytest
 import respx
 
 from moodle_cli import plugins
+
+# Set before anything imports moodle_cli.cli or moodle_cli.mcp_server, because those mount
+# plugins at import time -- which happens during collection, before any fixture can run.
+# The autouse fixture below cannot undo that: clearing the discovery cache does not
+# un-mount a Typer group or an MCP tool that is already registered. conftest is imported
+# ahead of every test module, so this is the last moment that is still early enough.
+os.environ.setdefault(plugins.DISABLE_ENV, "1")
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BASE_URL = "https://campus.example.edu"

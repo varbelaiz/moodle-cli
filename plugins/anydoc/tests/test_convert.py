@@ -41,6 +41,26 @@ def test_convert_file_raises_on_a_missing_file(tmp_path: Path) -> None:
         convert_file(tmp_path / "missing.docx")
 
 
+def test_an_unwritable_destination_is_a_conversion_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The write is as much a way to fail as the conversion, so it fails the same way.
+
+    Escaping as a bare OSError, it would abort a whole batch on one bad destination and
+    reach the user as a traceback, since the CLI only contains ConversionError.
+    """
+    source = tmp_path / "grades.csv"
+    source.write_text("name,grade\nAna,9\n", encoding="utf-8")
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "write_text", refuse)
+
+    with pytest.raises(ConversionError, match="could not write the markdown"):
+        convert_file(source)
+
+
 def test_convert_file_raises_on_an_unconvertible_file(tmp_path: Path) -> None:
     """Garbage bytes under a real extension: anydoc finds nothing meaningful in it."""
     broken = tmp_path / "broken.pdf"

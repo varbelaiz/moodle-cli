@@ -85,7 +85,9 @@ taken as fatal. See [docs/plugins.md](docs/plugins.md).
 
 ## Command reference
 
-Every command accepts `--json`, which prints machine-readable output instead of a table.
+Every command that answers a question accepts `--json`, which prints machine-readable
+output instead of a table. The ones that act rather than answer do not: `auth login`,
+`auth status`, `auth logout` and `course download` report progress as they go.
 Commands that take a course accept either its numeric id or a shortname prefix; a prefix
 matching more than one course is an error listing the candidates.
 
