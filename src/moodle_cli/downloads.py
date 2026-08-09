@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from fnmatch import fnmatch
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -25,7 +26,29 @@ from moodle_cli.models import CourseFile, Module, Section
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WHITESPACE = re.compile(r"\s+")
 _JSON_CONTENT_TYPE = "application/json"
+_HTML_CONTENT_TYPE = "text/html"
 _CHUNK = 64 * 1024
+
+# Google's stable, documented export API: the URL path segment right after
+# docs.google.com/ names the document type, and each type has exactly one export format
+# this app asks for -- native, not PDF, since that's what re-editing and `anydoc` want.
+_GOOGLE_DOC_EXTENSIONS = {"presentation": "pptx", "document": "docx", "spreadsheets": "xlsx"}
+_DOC_ID = re.compile(r"/d/([\w-]+)")
+_COLAB_ID = re.compile(r"/drive/([\w-]+)")
+_DRIVE_EXPORT_URL = "https://drive.google.com/uc?export=download&id={id}"
+_DRIVE_CONFIRM_URL = "https://drive.usercontent.google.com/download"
+_CONFIRM_TOKEN = re.compile(r'name="confirm"\s+value="([^"]+)"')
+_CONFIRM_UUID = re.compile(r'name="uuid"\s+value="([^"]+)"')
+_CONTENT_DISPOSITION_FILENAME = re.compile(r'filename="([^"]+)"')
+_MIME_EXTENSIONS = {
+    "application/pdf": "pdf",
+    "application/zip": "zip",
+    "application/x-zip-compressed": "zip",
+    "application/json": "ipynb",  # a Colab notebook served without a Content-Disposition
+    "video/mp4": "mp4",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+}
 
 
 class DownloadStatus(StrEnum):
@@ -48,6 +71,34 @@ class DownloadResult:
     path: Path
     status: DownloadStatus
     size: int
+
+
+@dataclass(frozen=True)
+class PlannedLink:
+    """A Google-hosted course link to fetch, paired with the destination its course
+    structure implies.
+
+    Unlike `PlannedDownload`, `destination` may be missing its extension: an opaque
+    Drive file's real name isn't known until `download_link` reads the response.
+    """
+
+    link: CourseFile
+    section: Section
+    module: Module
+    destination: Path
+
+
+@dataclass(frozen=True)
+class _GoogleExport:
+    """Where to fetch a Google-hosted link, and whether its extension is already known.
+
+    `drive_id` is set only for opaque Drive files -- it's what a virus-scan-warning
+    confirm-token retry needs, and native Docs/Slides/Sheets exports never hit that gate.
+    """
+
+    export_url: str
+    extension: str | None
+    drive_id: str | None = None
 
 
 def sanitize(name: str, *, fallback: str = "untitled") -> str:
@@ -74,6 +125,55 @@ def iter_course_files(sections: list[Section]) -> Iterator[tuple[Section, Module
         for module in section.modules:
             for file in module.files:
                 yield section, module, file
+
+
+def iter_course_links(sections: list[Section]) -> Iterator[tuple[Section, Module, CourseFile]]:
+    for section in sections:
+        for module in section.modules:
+            for link in module.links:
+                yield section, module, link
+
+
+def _classify_google_url(url: str) -> _GoogleExport | None:
+    """Map a course link to how to fetch it, or None if it isn't a recognized Google host.
+
+    GitHub, Slack, YouTube and similar links have nothing this app can export -- they stay
+    listed-only, same as before this existed.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+
+    if host == "docs.google.com":
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) < 3 or parts[0] not in _GOOGLE_DOC_EXTENSIONS or parts[1] != "d":
+            return None
+        doc_id, extension = parts[2], _GOOGLE_DOC_EXTENSIONS[parts[0]]
+        export_url = (
+            f"https://docs.google.com/presentation/d/{doc_id}/export/{extension}"
+            if parts[0] == "presentation"
+            else f"https://docs.google.com/{parts[0]}/d/{doc_id}/export?format={extension}"
+        )
+        return _GoogleExport(export_url=export_url, extension=extension)
+
+    if host == "drive.google.com":
+        match = _DOC_ID.search(parsed.path)
+        if not match:
+            return None
+        drive_id = match.group(1)
+        return _GoogleExport(
+            export_url=_DRIVE_EXPORT_URL.format(id=drive_id), extension=None, drive_id=drive_id
+        )
+
+    if host == "colab.research.google.com":
+        match = _COLAB_ID.search(parsed.path)
+        if not match:
+            return None
+        drive_id = match.group(1)
+        return _GoogleExport(
+            export_url=_DRIVE_EXPORT_URL.format(id=drive_id), extension=None, drive_id=drive_id
+        )
+
+    return None
 
 
 def matches_selection(
@@ -174,6 +274,75 @@ def _claim(
         candidate = destination.with_name(f"{stem}{destination.suffix}")
 
 
+def plan_link_downloads(
+    sections: list[Section],
+    root: Path,
+    *,
+    only_sections: set[int] | None = None,
+    only_modtypes: set[str] | None = None,
+) -> list[PlannedLink]:
+    """Map course links onto destination paths, mirroring `plan_downloads`' directory layout.
+
+    Only Google-hosted links are planned; `_classify_google_url` returning None for
+    everything else (GitHub, Slack, YouTube, ...) is the skip signal, not an error.
+    """
+    planned: list[PlannedLink] = []
+    claimed: dict[Path, str] = {}
+
+    for section, module, link in iter_course_links(sections):
+        if only_sections is not None and section.section not in only_sections:
+            continue
+        if only_modtypes is not None and module.modname not in only_modtypes:
+            continue
+        export = _classify_google_url(link.fileurl or "")
+        if export is None:
+            continue
+
+        parts = [sanitize(f"{section.section:02d} - {section.name}", fallback="section")]
+        if module.modname == "folder":
+            parts.append(sanitize(module.name, fallback="folder"))
+
+        stem = sanitize(link.filename, fallback="link")
+        filename = f"{stem}.{export.extension}" if export.extension else stem
+        destination = _claim_link(
+            root.joinpath(*parts, filename), export.export_url, module.id, claimed
+        )
+        if destination is None:
+            continue
+
+        planned.append(
+            PlannedLink(link=link, section=section, module=module, destination=destination)
+        )
+    return planned
+
+
+def _claim_link(
+    destination: Path, export_url: str, module_id: int, claimed: dict[Path, str]
+) -> Path | None:
+    """Resolve a link's destination against the links already claimed by this plan.
+
+    Every link's `filesize` is 0, so `_claim`'s byte-identity check can't tell two
+    activities with the same display name apart -- the resolved export URL is the
+    identity here instead. Returns None when the entry is a duplicate.
+    """
+    candidate = destination
+    suffix = 0
+    while True:
+        existing = claimed.get(candidate)
+        if existing is None:
+            claimed[candidate] = export_url
+            return candidate
+        if existing == export_url:
+            return None
+        suffix += 1
+        stem = (
+            f"{destination.stem} ({module_id})"
+            if suffix == 1
+            else (f"{destination.stem} ({module_id}-{suffix})")
+        )
+        candidate = destination.with_name(f"{stem}{destination.suffix}")
+
+
 def download_file(
     http: httpx.Client,
     file: CourseFile,
@@ -236,3 +405,127 @@ def _reject_error_payload(response: httpx.Response, file: CourseFile) -> None:
         message=str(payload.get("error") or payload.get("message") or "Download failed"),
         function=f"download:{file.filename}",
     )
+
+
+def download_link(
+    http: httpx.Client,
+    link: CourseFile,
+    destination: Path,
+    *,
+    overwrite: bool = False,
+) -> DownloadResult:
+    """Fetch a Google-hosted course link, resolving its real filename if the URL doesn't carry one.
+
+    Large Drive files come back as an HTML "can't scan this file for viruses" page instead
+    of the file; that page is retried once with a confirm token scraped out of it. A second
+    HTML response is not retried further -- this is screen-scraping an undocumented Google
+    page, not a stable API, so it must fail loudly rather than write that page to disk as
+    though it were the file.
+
+    Unlike ``pluginfile.php``, Google does answer with real HTTP error statuses: an export
+    can 401/403 when the doc isn't actually shared "anyone with the link" despite Moodle
+    linking it, or a Drive file's redirect chain can land on an accounts.google.com sign-in
+    page for the same reason (still 200, but no confirm token to find). Both are reported as
+    a `DownloadError` naming the cause, not left to `httpx`'s generic status exception, which
+    the caller doesn't catch and would otherwise abort every other planned download too.
+    """
+    export = _classify_google_url(link.fileurl or "")
+    if export is None:
+        raise DownloadError(f"{link.filename}: not a downloadable link")
+
+    if not overwrite and export.extension and destination.exists() and destination.stat().st_size:
+        return DownloadResult(
+            path=destination, status=DownloadStatus.SKIPPED, size=destination.stat().st_size
+        )
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    request_url, params = export.export_url, None
+
+    for attempt in range(2):
+        with http.stream("GET", request_url, params=params) as response:
+            if response.is_error:
+                hint = (
+                    ' -- the doc likely is not shared "anyone with the link"'
+                    if response.status_code in (401, 403)
+                    else ""
+                )
+                raise DownloadError(
+                    f"{link.filename}: Google returned HTTP {response.status_code}{hint}"
+                )
+
+            if _HTML_CONTENT_TYPE in response.headers.get("content-type", ""):
+                response.read()
+                if response.url.host == "accounts.google.com":
+                    raise DownloadError(
+                        f"{link.filename}: Drive redirected to a Google sign-in page "
+                        '-- the file likely is not shared "anyone with the link"'
+                    )
+                if attempt or export.drive_id is None:
+                    raise DownloadError(
+                        f"{link.filename}: Drive served a warning page instead of the file"
+                    )
+                request_url, params = _confirm_retry(export.drive_id, response.text, link)
+                continue
+
+            final = _resolve_link_filename(destination, export, response)
+            return _write_link_to_disk(response, final, link)
+
+    raise DownloadError(f"{link.filename}: Drive served a warning page instead of the file")
+
+
+def _confirm_retry(
+    drive_id: str, interstitial_html: str, link: CourseFile
+) -> tuple[str, dict[str, str]]:
+    """Pull the confirm token and uuid Drive's virus-scan warning page needs for a retry."""
+    confirm = _CONFIRM_TOKEN.search(interstitial_html)
+    uuid = _CONFIRM_UUID.search(interstitial_html)
+    if not confirm or not uuid:
+        raise DownloadError(
+            f"{link.filename}: could not find a confirm token on Drive's warning page"
+        )
+    params = {
+        "id": drive_id,
+        "export": "download",
+        "confirm": confirm.group(1),
+        "uuid": uuid.group(1),
+    }
+    return _DRIVE_CONFIRM_URL, params
+
+
+def _resolve_link_filename(
+    destination: Path, export: _GoogleExport, response: httpx.Response
+) -> Path:
+    """Rename an opaque Drive file's placeholder destination once its real name is known."""
+    if export.extension:
+        return destination
+
+    disposition = response.headers.get("content-disposition", "")
+    match = _CONTENT_DISPOSITION_FILENAME.search(disposition)
+    if match:
+        name = sanitize(dedupe_extension(match.group(1)), fallback=destination.name)
+        return destination.with_name(name)
+
+    content_type = response.headers.get("content-type", "").split(";")[0].strip()
+    extension = _MIME_EXTENSIONS.get(content_type)
+    return destination.with_name(f"{destination.name}.{extension}") if extension else destination
+
+
+def _write_link_to_disk(
+    response: httpx.Response, destination: Path, link: CourseFile
+) -> DownloadResult:
+    partial = destination.with_name(destination.name + ".part")
+    try:
+        written = 0
+        with partial.open("wb") as handle:
+            for chunk in response.iter_bytes(_CHUNK):
+                handle.write(chunk)
+                written += len(chunk)
+
+        if written == 0:
+            raise DownloadError(f"{link.filename}: Drive returned an empty response")
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+
+    partial.replace(destination)
+    return DownloadResult(path=destination, status=DownloadStatus.DOWNLOADED, size=written)
