@@ -22,9 +22,12 @@ from moodle_cli.config import load_config
 from moodle_cli.downloads import (
     DownloadStatus,
     PlannedDownload,
+    PlannedLink,
     download_file,
+    download_link,
     iter_course_files,
     plan_downloads,
+    plan_link_downloads,
     sanitize,
 )
 from moodle_cli.errors import MoodleError
@@ -487,6 +490,12 @@ def course_download(
         list[str] | None,
         typer.Option("--match", help="Glob on the filename, e.g. '*.pdf'. Repeatable."),
     ] = None,
+    links: Annotated[
+        bool,
+        typer.Option(
+            "--links", help="Also fetch Google Slides/Docs/Sheets and Drive-hosted links."
+        ),
+    ] = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="List what would be downloaded, write nothing.")
     ] = False,
@@ -498,7 +507,8 @@ def course_download(
 
     Selectors compose: --section and --type narrow by structure, --file and --match by
     filename. A --file name that matches nothing is an error rather than a silent
-    zero-file download, so a typo fails loudly.
+    zero-file download, so a typo fails loudly. --links only reaches Google-hosted links
+    (Slides/Docs/Sheets exports, Drive files, Colab notebooks); other hosts stay listed-only.
     """
     with open_client() as client:
         token = client.token
@@ -514,22 +524,34 @@ def course_download(
         only_names=set(names) if names else None,
         only_patterns=patterns or None,
     )
+    planned_links = (
+        plan_link_downloads(
+            contents,
+            root,
+            only_sections=set(sections) if sections else None,
+            only_modtypes=set(types) if types else None,
+        )
+        if links
+        else []
+    )
 
     if names:
         _reject_unknown_names(names, planned, contents)
 
-    if not planned:
+    if not planned and not planned_links:
         console.print("[yellow]No matching files.[/yellow]")
         return
 
     total = sum(p.file.filesize for p in planned)
-    console.print(
-        f"[bold]{resolved.shortname}[/bold]: {len(planned)} "
-        f"{_plural(len(planned), 'file')}, {_human_size(total)} -> {root}/"
-    )
+    summary_parts = [f"{len(planned)} {_plural(len(planned), 'file')}, {_human_size(total)}"]
+    if links:
+        summary_parts.append(f"{len(planned_links)} {_plural(len(planned_links), 'link')}")
+    console.print(f"[bold]{resolved.shortname}[/bold]: {', '.join(summary_parts)} -> {root}/")
 
     if dry_run:
         _print_plan(planned, root)
+        if planned_links:
+            _print_link_plan(planned_links, root)
         return
 
     downloaded = skipped = 0
@@ -553,7 +575,31 @@ def course_download(
                     f"[dim]({_human_size(result.size)})[/dim]"
                 )
 
-    failed = len(planned) - downloaded - skipped
+        for link_item in planned_links:
+            relative = link_item.destination.relative_to(root)
+            try:
+                result = download_link(
+                    http, link_item.link, link_item.destination, overwrite=overwrite
+                )
+            except MoodleError as exc:
+                err_console.print(
+                    f"  [red]FAIL[/red] [dim][link][/dim] {escape(str(relative))}: "
+                    f"{escape(str(exc))}"
+                )
+                continue
+            relative = result.path.relative_to(root)  # download_link may rename the placeholder
+            if result.status is DownloadStatus.SKIPPED:
+                skipped += 1
+                console.print(f"  [dim]skip[/dim] [dim][link][/dim] {escape(str(relative))}")
+            else:
+                downloaded += 1
+                console.print(
+                    f"  [green]ok[/green]   [dim][link][/dim] {escape(str(relative))} "
+                    f"[dim]({_human_size(result.size)})[/dim]"
+                )
+
+    total_planned = len(planned) + len(planned_links)
+    failed = total_planned - downloaded - skipped
     summary = f"\n{downloaded} downloaded, {skipped} already present"
     if failed:
         summary += f", [red]{failed} failed[/red]"
@@ -595,6 +641,17 @@ def _print_plan(planned: list[PlannedDownload], root: Path) -> None:
             item.module.modname,
             str(item.destination.relative_to(root)),
         )
+    console.print(table)
+
+
+def _print_link_plan(planned: list[PlannedLink], root: Path) -> None:
+    """Like `_print_plan`, but sizes are unknown until fetched and destinations may still
+    be missing their extension for an opaque Drive file."""
+    table = Table(show_header=True)
+    table.add_column("type", style="dim")
+    table.add_column("destination")
+    for item in planned:
+        table.add_row(item.module.modname, str(item.destination.relative_to(root)))
     console.print(table)
 
 
