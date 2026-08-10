@@ -3,7 +3,7 @@
     "id": 900,
     "name": "General",
     "visible": 1,
-    "summary": "",
+    "summary": "<p>1 de marzo - 7 de marzo</p>",
     "summaryformat": 1,
     "section": 0,
     "hiddenbynumsections": 0,
@@ -90,6 +90,16 @@
             "isexternalfile": false
           }
         ]
+      },
+      {
+        "id": 7,
+        "name": "Ejercicios Unidad 2 v1",
+        "instance": 7,
+        "modname": "resource",
+        "url": "https://campus.example.edu/mod/resource/view.php?id=7",
+        "visible": 1,
+        "uservisible": true,
+        "description": "<p>Hay una versión más nueva en la carpeta de la semana 5.</p>"
       }
     ]
   },
@@ -111,6 +121,16 @@
         "url": "https://campus.example.edu/mod/assign/view.php?id=5",
         "visible": 1,
         "uservisible": true
+      },
+      {
+        "id": 6,
+        "name": "ANTES DE LA PRÓXIMA CLASE Repasar el ap...",
+        "instance": 6,
+        "modname": "label",
+        "url": null,
+        "visible": 1,
+        "uservisible": true,
+        "description": "<div class=\"no-overflow\"><p><strong>ANTES DE LA PRÓXIMA CLASE</strong></p><ul><li>Repasar el apunte de la unidad 2.</li></ul></div>"
       }
     ]
   }

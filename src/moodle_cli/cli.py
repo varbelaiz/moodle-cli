@@ -400,9 +400,19 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
         console.print(
             f"[bold cyan]{section.section:>2}. {escape(section.name)}[/bold cyan]{suffix}"
         )
+        if section.summary_text:
+            _print_block("     [dim italic]", 5, section.summary_text, "[/dim italic]")
         for module in section.modules:
             marker = "" if module.uservisible else " [dim](hidden)[/dim]"
-            console.print(f"     [dim]{module.modname:<10}[/dim] {escape(module.name)}{marker}")
+            # A label's name is a ~50-char preview Moodle itself truncates; its
+            # description carries the full text, which is what a reader wants.
+            is_label = module.modname == "label"
+            title = (module.description_text if is_label else module.name) or module.name
+            _print_block(f"     [dim]{module.modname:<10}[/dim] ", 16, title, marker)
+            # Other module types keep a real title in `name`; a description here is a
+            # teacher's added instructions shown below the title on the course page.
+            if not is_label and module.description_text and module.description_text != title:
+                _print_block("                ", 16, module.description_text)
             for file in module.files:
                 # Size leads so a long filename wrapping cannot orphan it on its own line.
                 size = _human_size(file.filesize).rjust(9)
@@ -410,6 +420,21 @@ def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
             for link in module.links:
                 console.print(f"       [dim]{'link':>9}[/dim]  {escape(link.fileurl or '')}")
         console.print()
+
+
+def _print_block(prefix: str, indent_width: int, text: str, suffix: str = "") -> None:
+    """Print multi-line text with ``prefix`` on the first line, aligned continuation after.
+
+    Moodle stores prose as one HTML blob; a plain ``console.print`` would run every line
+    together at the console's left edge instead of under where the text started. ``prefix``
+    may carry Rich markup, so its rendered width has to be passed separately as
+    ``indent_width`` rather than derived from ``len(prefix)``.
+    """
+    lines = text.splitlines() or [""]
+    console.print(f"{prefix}{escape(lines[0])}{suffix}")
+    indent = " " * indent_width
+    for line in lines[1:]:
+        console.print(f"{indent}{escape(line)}")
 
 
 def _count(n: int, noun: str) -> str:
