@@ -22,6 +22,7 @@ from moodle_cli.mcp_server import (
     get_assignment_status,
     get_assignments,
     get_course_announcements,
+    get_course_contents,
     get_grade_summary,
     get_grades,
     get_quiz_status,
@@ -109,6 +110,45 @@ def test_search_courses_matches_section_names(
     assert all(r["match"] == "section" for r in results)
     assert all(r["section_number"] == 1 for r in results)
     assert {r["course"] for r in results} == {"IOS460 - 123246", "I312 - 106931", "I310 - 106934"}
+
+
+@respx.mock
+def test_get_course_contents_reports_a_sections_summary_and_a_labels_full_text(
+    courses_payload: dict[str, Any], contents_payload: list[dict[str, Any]]
+) -> None:
+    """A label's full text and a section's date range must reach an agent too.
+
+    The CLI table and this tool read the same models; a fix that only patched the display
+    layer would leave an agent working from the truncated ``name`` preview.
+    """
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = get_course_contents("IOS460")
+
+    general = next(s for s in result["sections"] if s["name"] == "General")
+    assert general["summary"] == "1 de marzo - 7 de marzo"
+    entregas = next(s for s in result["sections"] if s["name"] == "Entregas")
+    label = next(m for m in entregas["modules"] if m["type"] == "label")
+    assert "Repasar el apunte de la unidad 2." in label["name"]
+
+
+@respx.mock
+def test_get_course_contents_pairs_a_real_titles_description_alongside_it(
+    courses_payload: dict[str, Any], contents_payload: list[dict[str, Any]]
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = get_course_contents("IOS460")
+
+    general = next(s for s in result["sections"] if s["name"] == "General")
+    module = next(m for m in general["modules"] if m["name"] == "Ejercicios Unidad 2 v1")
+    assert module["description"] == "Hay una versión más nueva en la carpeta de la semana 5."
 
 
 @respx.mock
