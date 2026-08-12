@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from moodle_cli import cli
+from moodle_cli import cli, toolenv
 from moodle_cli.plugins import CatalogEntry
 from moodle_cli.toolenv import Environment, injected_packages
 
@@ -56,6 +56,14 @@ def catalog_of(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
             cli,
             "installed_extras",
             lambda: frozenset(e.name for e in entries if e.official and e.installed),
+        )
+        # Pinned for the same reason as the other two: read for real, this returns whatever
+        # extras this checkout happens to declare, so a test would prove something
+        # different here than in an environment with a different set of plugins.
+        monkeypatch.setattr(
+            cli,
+            "extra_distributions",
+            lambda: {e.name: e.distribution for e in entries if e.official},
         )
 
     return install
@@ -266,6 +274,30 @@ def test_plugins_install_does_not_restate_a_plugin_uv_reports_as_injected(
     assert "--with" not in recorded[0]
 
 
+def test_plugins_install_keeps_an_injected_third_party_plugin(
+    monkeypatch: pytest.MonkeyPatch, catalog_of: Callable[..., None], recorded: list[Sequence[str]]
+) -> None:
+    """A third-party plugin is in the catalog but is not an extra, so it has to stay a --with.
+
+    `catalog()` lists third-party plugins on purpose, so filtering the injected set against
+    the whole catalog drops them. They cannot come back as an extra either, since
+    `installed_extras()` reports only official ones — so dropping them here uninstalls
+    them, which is the one outcome the abort above exists to prevent.
+    """
+    catalog_of(
+        _entry("anydoc"),
+        _entry("panopto", official=False, installed=True, version="0.2.0"),
+    )
+    _environment(monkeypatch, "uv-tool", injected=["moodle-cli-panopto==0.2.0"])
+
+    result = runner.invoke(cli.app, ["plugins", "install", "anydoc"])
+
+    assert result.exit_code == 0
+    assert "moodle-cli-panopto==0.2.0" in recorded[0], (
+        "a third-party plugin was dropped from the rebuilt install command"
+    )
+
+
 def test_plugins_install_aborts_when_the_injected_set_cannot_be_read(
     monkeypatch: pytest.MonkeyPatch, catalog_of: Callable[..., None], recorded: list[Sequence[str]]
 ) -> None:
@@ -378,3 +410,34 @@ def test_the_injected_set_is_read_from_uvs_own_listing(
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert injected_packages("/usr/bin/uv") == expected
+
+
+@pytest.mark.parametrize(
+    ("direct_url", "expected"),
+    [
+        # Only this one points back at a checkout someone can edit.
+        ('{"url": "file:///src/moodle-cli", "dir_info": {"editable": true}}', True),
+        # PEP 610 writes direct_url.json for these too, and none of them is a checkout.
+        ('{"url": "file:///src/moodle-cli", "dir_info": {"editable": false}}', False),
+        ('{"url": "file:///tmp/moodle_cli-0.1.0-py3-none-any.whl", "archive_info": {}}', False),
+        ('{"url": "https://github.com/varbelaiz/moodle-cli", "vcs_info": {"vcs": "git"}}', False),
+        (None, False),  # a plain wheel from an index has no direct_url.json at all
+        ("not json", False),
+    ],
+)
+def test_only_an_editable_install_counts_as_a_checkout(
+    monkeypatch: pytest.MonkeyPatch, direct_url: str | None, expected: bool
+) -> None:
+    """`plugins install` refuses on a checkout, so a false positive refuses everywhere.
+
+    A wheel or a git URL installed with `uv tool install` also carries direct_url.json;
+    reading its presence alone would send those users to a `uv sync` in a checkout they
+    may not have.
+    """
+    monkeypatch.setattr(
+        toolenv,
+        "distribution",
+        lambda name: type("Dist", (), {"read_text": lambda self, path: direct_url})(),
+    )
+
+    assert toolenv._is_editable() is expected

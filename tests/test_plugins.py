@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
+import click
 import pytest
 import typer
 from mcp.server.fastmcp import FastMCP
@@ -202,6 +203,33 @@ def test_a_plugin_that_raises_while_building_its_commands_is_skipped(
 
     assert result.exit_code == 0
     assert "boom" not in result.stdout
+
+
+def test_a_plugin_returning_the_wrong_type_of_group_is_skipped(
+    fake_plugins: Callable[..., None],
+) -> None:
+    """Returning a click.Group instead of a typer.Typer is the easy mistake to make.
+
+    Typer stores whatever `add_typer` is handed and only trips over it later, while Click
+    builds the command tree — which happens on every invocation, `--help` included. So an
+    unchecked wrong type does not skip one plugin, it takes the whole CLI down.
+    """
+
+    class Confused(Plugin):
+        name = "confused"
+
+        def commands(self) -> typer.Typer:
+            return click.Group("confused")  # type: ignore[return-value]
+
+    fake_plugins(FakeEntryPoint("confused", Confused()))
+
+    app = _host()
+    plugins.mount_commands(app)
+
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "confused" not in result.stdout
 
 
 def test_a_plugins_tools_are_registered_under_its_own_prefix(
