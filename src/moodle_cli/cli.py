@@ -20,6 +20,7 @@ from moodle_cli.auth import TokenStore, mint_token
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
 from moodle_cli.downloads import (
+    DownloadResult,
     DownloadStatus,
     PlannedDownload,
     PlannedLink,
@@ -560,46 +561,18 @@ def course_download(
     downloaded = skipped = 0
     with httpx.Client(timeout=300, follow_redirects=True) as http:
         for item in planned:
-            relative = item.destination.relative_to(root)
-            try:
-                result = download_file(
-                    http, item.file, token, item.destination, overwrite=overwrite
-                )
-            except MoodleError as exc:
-                err_console.print(f"  [red]FAIL[/red] {escape(str(relative))}: {escape(str(exc))}")
-                continue
-            if result.status is DownloadStatus.SKIPPED:
-                skipped += 1
-                console.print(f"  [dim]skip[/dim] {escape(str(relative))}")
-            else:
-                downloaded += 1
-                console.print(
-                    f"  [green]ok[/green]   {escape(str(relative))} "
-                    f"[dim]({_human_size(result.size)})[/dim]"
-                )
+            fetch = functools.partial(
+                download_file, http, item.file, token, item.destination, overwrite=overwrite
+            )
+            downloaded, skipped = _run_download(root, item.destination, fetch, downloaded, skipped)
 
         for link_item in planned_links:
-            relative = link_item.destination.relative_to(root)
-            try:
-                result = download_link(
-                    http, link_item.link, link_item.destination, overwrite=overwrite
-                )
-            except MoodleError as exc:
-                err_console.print(
-                    f"  [red]FAIL[/red] [dim][link][/dim] {escape(str(relative))}: "
-                    f"{escape(str(exc))}"
-                )
-                continue
-            relative = result.path.relative_to(root)  # download_link may rename the placeholder
-            if result.status is DownloadStatus.SKIPPED:
-                skipped += 1
-                console.print(f"  [dim]skip[/dim] [dim][link][/dim] {escape(str(relative))}")
-            else:
-                downloaded += 1
-                console.print(
-                    f"  [green]ok[/green]   [dim][link][/dim] {escape(str(relative))} "
-                    f"[dim]({_human_size(result.size)})[/dim]"
-                )
+            fetch = functools.partial(
+                download_link, http, link_item.link, link_item.destination, overwrite=overwrite
+            )
+            downloaded, skipped = _run_download(
+                root, link_item.destination, fetch, downloaded, skipped, label="[dim][link][/dim] "
+            )
 
     total_planned = len(planned) + len(planned_links)
     failed = total_planned - downloaded - skipped
@@ -609,6 +582,33 @@ def course_download(
     console.print(summary)
     if failed:
         raise typer.Exit(1)
+
+
+def _run_download(
+    root: Path,
+    destination: Path,
+    fetch: Callable[[], DownloadResult],
+    downloaded: int,
+    skipped: int,
+    *,
+    label: str = "",
+) -> tuple[int, int]:
+    """Run one planned download, print its outcome, and return the updated counters."""
+    relative = destination.relative_to(root)
+    try:
+        result = fetch()
+    except MoodleError as exc:
+        err_console.print(f"  [red]FAIL[/red] {label}{escape(str(relative))}: {escape(str(exc))}")
+        return downloaded, skipped
+    relative = result.path.relative_to(root)  # a link download may rename the placeholder
+    if result.status is DownloadStatus.SKIPPED:
+        console.print(f"  [dim]skip[/dim] {label}{escape(str(relative))}")
+        return downloaded, skipped + 1
+    console.print(
+        f"  [green]ok[/green]   {label}{escape(str(relative))} "
+        f"[dim]({_human_size(result.size)})[/dim]"
+    )
+    return downloaded + 1, skipped
 
 
 def _reject_unknown_names(
