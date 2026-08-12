@@ -256,6 +256,54 @@ def test_download_selects_by_glob(
     assert "Carátula" in result.stdout
 
 
+def _add_url_module(contents_payload: list[dict[str, Any]], module_id: int, url: str) -> None:
+    contents_payload[0]["modules"].append(
+        {
+            "id": module_id,
+            "name": f"Clase {module_id}",
+            "instance": module_id,
+            "modname": "url",
+            "url": f"https://campus.example.edu/mod/url/view.php?id={module_id}",
+            "visible": 1,
+            "uservisible": True,
+            "contents": [
+                {
+                    "type": "url",
+                    "filename": f"Clase {module_id}",
+                    "filepath": None,
+                    "filesize": 0,
+                    "fileurl": url,
+                    "timemodified": 0,
+                    "mimetype": None,
+                    "isexternalfile": False,
+                }
+            ],
+        }
+    )
+
+
+@respx.mock
+def test_download_links_are_filtered_by_file_selector(
+    courses_payload: dict[str, Any],
+    contents_payload: list[dict[str, Any]],
+    tmp_cwd: Path,
+) -> None:
+    """--file must narrow --links the same way it narrows regular files."""
+    _add_url_module(contents_payload, 10, "https://docs.google.com/presentation/d/DOC1/edit")
+    _add_url_module(contents_payload, 11, "https://docs.google.com/presentation/d/DOC2/edit")
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(
+        app, ["course", "download", "IOS460", "--file", "Clase 10", "--links", "--dry-run"]
+    )
+
+    assert result.exit_code == 0
+    assert "1 link" in result.stdout
+
+
 @respx.mock
 def test_api_error_is_reported_cleanly(courses_payload: dict[str, Any]) -> None:
     respx.post(REST_URL).mock(

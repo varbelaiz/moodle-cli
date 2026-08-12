@@ -482,6 +482,22 @@ def test_plan_link_downloads_filters_by_module_type() -> None:
     assert plan_link_downloads([section], Path("root"), only_modtypes={"resource"}) == []
 
 
+def test_plan_link_downloads_filters_by_name() -> None:
+    section = _link_section(
+        section_num=1, name="Clase 1", url="https://docs.google.com/presentation/d/DOC1/edit"
+    )
+    assert plan_link_downloads([section], Path("root"), only_names={"Clase 2"}) == []
+    assert len(plan_link_downloads([section], Path("root"), only_names={"Clase 1"})) == 1
+
+
+def test_plan_link_downloads_filters_by_pattern() -> None:
+    section = _link_section(
+        section_num=1, name="Clase 1", url="https://docs.google.com/presentation/d/DOC1/edit"
+    )
+    assert plan_link_downloads([section], Path("root"), only_patterns={"Modulo *"}) == []
+    assert len(plan_link_downloads([section], Path("root"), only_patterns={"Clase *"})) == 1
+
+
 # -- fetching links ------------------------------------------------------------------
 
 _SLIDES_EXPORT_URL = "https://docs.google.com/presentation/d/DOC1/export/pptx"

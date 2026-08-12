@@ -26,6 +26,7 @@ from moodle_cli.downloads import (
     download_file,
     download_link,
     iter_course_files,
+    iter_course_links,
     plan_downloads,
     plan_link_downloads,
     sanitize,
@@ -530,13 +531,15 @@ def course_download(
             root,
             only_sections=set(sections) if sections else None,
             only_modtypes=set(types) if types else None,
+            only_names=set(names) if names else None,
+            only_patterns=patterns or None,
         )
         if links
         else []
     )
 
     if names:
-        _reject_unknown_names(names, planned, contents)
+        _reject_unknown_names(names, planned, planned_links, contents, links=links)
 
     if not planned and not planned_links:
         console.print("[yellow]No matching files.[/yellow]")
@@ -609,19 +612,28 @@ def course_download(
 
 
 def _reject_unknown_names(
-    requested: list[str], planned: list[PlannedDownload], contents: list[Section]
+    requested: list[str],
+    planned: list[PlannedDownload],
+    planned_links: list[PlannedLink],
+    contents: list[Section],
+    *,
+    links: bool,
 ) -> None:
-    """Fail on a --file name that selected nothing.
+    """Fail on a --file name that selected nothing, across files and links alike.
 
     Distinguishes a typo from a name excluded by another filter, because the two need
-    different fixes and the symptom is identical.
+    different fixes and the symptom is identical. A name that only belongs to a link is
+    "no such file" when `--links` wasn't passed -- it's excluded by that, not by
+    --section/--type -- so link names only count as in-course when `links` is true.
     """
-    selected = {p.file.filename for p in planned}
+    selected = {p.file.filename for p in planned} | {p.link.filename for p in planned_links}
     missing = [name for name in requested if name not in selected]
     if not missing:
         return
 
     in_course = {f.filename for _, _, f in iter_course_files(contents)}
+    if links:
+        in_course |= {link.filename for _, _, link in iter_course_links(contents)}
     for name in missing:
         reason = (
             "excluded by --section/--type" if name in in_course else "no such file in this course"
