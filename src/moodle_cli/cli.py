@@ -5,8 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import textwrap
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, ParamSpec, TypeVar
@@ -17,7 +16,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from moodle_cli.auth import TokenStore, mint_token, resolve_token
+from moodle_cli.auth import TokenStore, mint_token
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
 from moodle_cli.downloads import (
@@ -41,7 +40,25 @@ from moodle_cli.models import (
     Section,
     epoch_to_datetime,
 )
+from moodle_cli.plugins import (
+    CORE_DISTRIBUTION,
+    CatalogEntry,
+    catalog,
+    extra_distributions,
+    installed_extras,
+    mount_commands,
+    requirement_name,
+)
 from moodle_cli.search import SearchHit, search_contents
+from moodle_cli.session import open_client
+from moodle_cli.toolenv import (
+    Environment,
+    detect,
+    injected_packages,
+    install_command,
+    pip_command,
+    run,
+)
 
 console = Console()
 err_console = Console(stderr=True)
@@ -57,9 +74,16 @@ app = typer.Typer(
 auth_app = typer.Typer(help="Manage authentication.", no_args_is_help=True)
 courses_app = typer.Typer(help="Work with your enrolled courses.", no_args_is_help=True)
 course_app = typer.Typer(help="Work with a single course.", no_args_is_help=True)
+plugins_app = typer.Typer(help="Manage optional plugins.", no_args_is_help=True)
 app.add_typer(auth_app, name="auth")
 app.add_typer(courses_app, name="courses")
 app.add_typer(course_app, name="course")
+app.add_typer(plugins_app, name="plugins")
+
+# Mounted at import rather than in main(), because the tests and any other embedder import
+# `app` directly; wiring only the entry point would give the plugin surface to a shell and
+# to nothing else that drives this app. Core groups are added first so they own their names.
+mount_commands(app)
 
 
 class View(StrEnum):
@@ -100,13 +124,6 @@ def handle_errors(func: Callable[P, R]) -> Callable[P, R]:
             raise typer.Exit(1) from exc
 
     return wrapper
-
-
-@contextmanager
-def _client() -> Iterator[MoodleClient]:
-    config = load_config()
-    with MoodleClient(config.base_url, resolve_token(config)) as client:
-        yield client
 
 
 def _emit_json(payload: Any) -> None:
@@ -163,6 +180,9 @@ def auth_login(
     token = mint_token(config.base_url, user, password)
     stored = TokenStore().set(config.keyring_key, token)
 
+    # The one place that builds a client directly: the token being verified is the one just
+    # minted, so resolving would consult the environment and the keyring instead and could
+    # answer with a different token than the login produced.
     with MoodleClient(config.base_url, token) as client:
         info = client.get_site_info()
 
@@ -180,9 +200,7 @@ def auth_login(
 @handle_errors
 def auth_status() -> None:
     """Show whether a usable token exists, and who it belongs to."""
-    config = load_config()
-    token = resolve_token(config, allow_mint=False)
-    with MoodleClient(config.base_url, token) as client:
+    with open_client(allow_mint=False) as client:
         info = client.get_site_info()
     console.print(f"[green]Authenticated[/green] as {info.fullname} (id {info.userid})")
     console.print(f"  site: {info.sitename}")
@@ -217,7 +235,7 @@ def courses_list(
     campus never sets one. In practice 'in-progress' returns everything and 'past'/'future'
     return nothing; only 'all', 'starred' and 'hidden' discriminate.
     """
-    with _client() as client:
+    with open_client() as client:
         courses = client.list_courses(view=view.value, sort=sort.value)
 
     if as_json:
@@ -252,7 +270,7 @@ def courses_grades(as_json: JsonOpt = False) -> None:
     Works even for a course whose gradebook is not open to students. For a per-item
     breakdown of one course, use `course grades` instead.
     """
-    with _client() as client:
+    with open_client() as client:
         course_names = _course_names(client)
         overview = client.get_grade_overview()
 
@@ -281,7 +299,7 @@ def courses_assignments(as_json: JsonOpt = False) -> None:
     Ordered by due date, undated last, so the next deadline is at the top. For one course,
     use `course assignments`.
     """
-    with _client() as client:
+    with open_client() as client:
         course_names = _course_names(client)
         assignments = sorted(client.get_assignments(), key=_by_due_date)
 
@@ -345,7 +363,7 @@ def courses_search(
     github.com finds it. The match column names what was hit; when it is an activity name,
     the files and links shown are the activity's whole contents rather than a filtered set.
     """
-    with _client() as client:
+    with open_client() as client:
         results = search_contents(client, query)
 
     if as_json:
@@ -388,7 +406,7 @@ def _hit_contents(hit: SearchHit) -> str:
 @handle_errors
 def course_contents(course: CourseArg, as_json: JsonOpt = False) -> None:
     """Show a course's sections, activities, downloadable files and external links."""
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         sections = client.get_course_contents(resolved.id)
 
@@ -494,10 +512,8 @@ def course_download(
     zero-file download, so a typo fails loudly. --links only reaches Google-hosted links
     (Slides/Docs/Sheets exports, Drive files, Colab notebooks); other hosts stay listed-only.
     """
-    config = load_config()
-    token = resolve_token(config)
-
-    with MoodleClient(config.base_url, token) as client:
+    with open_client() as client:
+        token = client.token
         resolved = client.resolve_course(course)
         contents = client.get_course_contents(resolved.id)
 
@@ -668,7 +684,7 @@ def course_participants(
     Email addresses are withheld unless --emails is passed: the API returns them for every
     participant, and they are not something to spill into a terminal or a log by default.
     """
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         participants = client.get_participants(resolved.id)
 
@@ -710,7 +726,7 @@ def course_announcements(course: CourseArg, as_json: JsonOpt = False) -> None:
     Only a forum Moodle marks as "news" carries announcements; a course without one
     prints nothing.
     """
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         announcements = client.get_announcements([resolved.id])
 
@@ -758,7 +774,7 @@ def course_assignments(course: CourseArg, as_json: JsonOpt = False) -> None:
 
     For every course at once, use `courses assignments`.
     """
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         assignments = client.get_assignments([resolved.id])
 
@@ -802,7 +818,7 @@ def course_assignment_status(assignment_id: AssignmentIdArg, as_json: JsonOpt = 
     `assignment_id` is the id from `course assignments` — not a course-module id, which
     this call rejects.
     """
-    with _client() as client:
+    with open_client() as client:
         status = client.get_assignment_status(assignment_id)
 
     if as_json:
@@ -825,7 +841,7 @@ def course_assignment_status(assignment_id: AssignmentIdArg, as_json: JsonOpt = 
 @handle_errors
 def course_quizzes(course: CourseArg, as_json: JsonOpt = False) -> None:
     """List a course's quizzes and their open/close windows."""
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         quizzes = client.get_quizzes([resolved.id])
 
@@ -870,7 +886,7 @@ def course_quiz_status(
     lookup to that course; without it every enrolled course's quizzes are fetched, since a
     quiz id alone does not say which course holds it.
     """
-    with _client() as client:
+    with open_client() as client:
         course_id = client.resolve_course(course).id if course else None
         status = client.get_quiz_status(quiz_id, course_id=course_id)
 
@@ -901,7 +917,7 @@ def course_grades(course: CourseArg, as_json: JsonOpt = False) -> None:
     Fails if the instructor has not opened the gradebook to students in this course;
     `courses grades` still works in that case, just without per-item detail.
     """
-    with _client() as client:
+    with open_client() as client:
         resolved = client.resolve_course(course)
         items = client.get_grade_items(resolved.id)
 
@@ -916,6 +932,209 @@ def course_grades(course: CourseArg, as_json: JsonOpt = False) -> None:
     for i in items:
         table.add_row(escape(i.label), i.gradeformatted or "-", str(i.grademax))
     console.print(table)
+
+
+# -- plugins ---------------------------------------------------------------------
+
+
+def _catalog_payload(entry: CatalogEntry) -> dict[str, Any]:
+    return {
+        "name": entry.name,
+        "distribution": entry.distribution,
+        "official": entry.official,
+        "status": "error" if entry.problem else "installed" if entry.installed else "available",
+        "version": entry.version,
+        "summary": entry.summary,
+        "command_group": entry.mounted_as,
+        "mcp_tools": list(entry.tools),
+        "problem": entry.problem,
+    }
+
+
+@plugins_app.command("list")
+@handle_errors
+def plugins_list(as_json: JsonOpt = False) -> None:
+    """List the official plugins and what each one adds.
+
+    Never reaches the network: a plugin you have not installed is listed from the extras
+    this release declares, so the command works offline and tells no index what you are
+    looking at. That is also why an uninstalled plugin has no description — the summary
+    lives in that package's own metadata, which is not on this machine yet.
+
+    Third-party plugins are listed too, marked as such. They cannot be installed from here,
+    but a command group appearing from nowhere is what this command exists to explain.
+    """
+    entries = catalog()
+    if as_json:
+        _emit_json([_catalog_payload(e) for e in entries])
+        return
+
+    if not entries:
+        console.print("[yellow]No plugins in the catalog for this release.[/yellow]")
+        return
+
+    table = Table(title=f"{len(entries)} plugins")
+    table.add_column("name", no_wrap=True)
+    table.add_column("source", no_wrap=True, style="dim")
+    table.add_column("status", no_wrap=True)
+    table.add_column("version", justify="right", style="dim", no_wrap=True)
+    table.add_column("adds", no_wrap=True)
+    table.add_column("description", ratio=1, overflow="ellipsis")
+    for entry in entries:
+        if entry.problem:
+            status = "[red]error[/red]"
+        elif entry.installed:
+            status = "[green]installed[/green]"
+        else:
+            status = "available"
+        adds = ", ".join(filter(None, [entry.mounted_as, *entry.tools])) or "-"
+        table.add_row(
+            entry.name,
+            "official" if entry.official else "third-party",
+            status,
+            entry.version or "-",
+            adds,
+            escape(entry.summary or "-"),
+        )
+    console.print(table)
+
+    # A plugin that is not installed here has no metadata to describe it, so the hint
+    # replaces the description rather than being squeezed into the column beside it.
+    if any(not entry.installed for entry in entries):
+        console.print("Install one with `moodle plugins install NAME`.")
+
+    for entry in entries:
+        if entry.problem:
+            err_console.print(f"[red]{entry.name}:[/red] {escape(entry.problem)}")
+
+
+def _known(name: str) -> CatalogEntry:
+    """The official catalog entry for `name`, or an error naming what is installable."""
+    for entry in catalog():
+        if entry.name != name:
+            continue
+        if entry.official:
+            return entry
+        raise MoodleError(
+            f"{name} is a third-party plugin, not one this CLI installs. Remove it with "
+            f"`uv pip uninstall {entry.distribution}`, or reinstall it the way you added it."
+        )
+    known = ", ".join(e.name for e in catalog() if e.official) or "none in this release"
+    raise MoodleError(f"No such plugin: {name!r}. Known plugins: {known}.")
+
+
+def _plan(name: str, *, keep: bool) -> tuple[Environment, list[str]]:
+    """The environment and the command that leaves it with `name` installed or removed."""
+    env = detect()
+    if env.kind == "editable":
+        raise MoodleError(
+            "This moodle is an editable install from a checkout. Change its extras there "
+            f"instead, with `uv sync --extra {name}`."
+        )
+    if env.uv is None:
+        spec = f"{CORE_DISTRIBUTION}[{name}]"
+        raise MoodleError(
+            f"uv is not on PATH, so this cannot change the installation itself. "
+            f"Install {spec!r} with the packaging tool you used for moodle-cli."
+        )
+
+    wanted = installed_extras() | {name} if keep else installed_extras() - {name}
+
+    if env.kind == "uv-tool":
+        injected = injected_packages(env.uv)
+        if injected is None:
+            spec = f"{CORE_DISTRIBUTION}[{','.join(sorted(wanted))}]"
+            raise MoodleError(
+                "Could not read the packages injected into this tool environment, and "
+                "reinstalling without them would remove them. Run "
+                f'`uv tool install --reinstall "{spec}"` yourself, '
+                "restating every --with package."
+            )
+        # Only an official plugin can come back as an extra, so only an official one may
+        # be dropped from the injected set. A third-party plugin is in the catalog too,
+        # and filtering against the whole catalog would drop it from `--with` without
+        # `wanted` ever restating it, uninstalling it in silence.
+        installable = set(extra_distributions().values())
+        foreign = [p for p in injected if requirement_name(p) not in installable]
+        return env, install_command(env.uv, wanted, foreign)
+
+    spec = f"{CORE_DISTRIBUTION}[{name}]" if keep else _known(name).distribution
+    return env, pip_command(env.uv, env.python, spec, uninstall=not keep)
+
+
+@plugins_app.command("install")
+@handle_errors
+def plugins_install(
+    name: Annotated[str, typer.Argument(help="Plugin name, as shown by `plugins list`.")],
+    as_json: JsonOpt = False,
+) -> None:
+    """Install an official plugin into this installation of moodle.
+
+    Extras and hand-injected packages belong to the environment rather than to a package,
+    so on a `uv tool` installation this rebuilds the whole install command from the current
+    state; anything added by hand with --with is carried across.
+    """
+    entry = _known(name)
+    if entry.installed:
+        message = f"{name} is already installed ({entry.distribution} {entry.version})."
+        if as_json:
+            _emit_json({"plugin": name, "action": "already-installed", "command": None})
+        else:
+            console.print(f"[green]{escape(message)}[/green]")
+        return
+
+    env, argv = _plan(name, keep=True)
+    output = run(argv, capture=as_json)
+
+    if as_json:
+        _emit_json(
+            {
+                "plugin": name,
+                "action": "installed",
+                "environment": env.kind,
+                "command": argv,
+                "output": output,
+            }
+        )
+        return
+    console.print(f"[green]Installed[/green] {name}. Its commands appear on the next run.")
+
+
+@plugins_app.command("uninstall")
+@handle_errors
+def plugins_uninstall(
+    name: Annotated[str, typer.Argument(help="Plugin name, as shown by `plugins list`.")],
+    as_json: JsonOpt = False,
+) -> None:
+    """Remove an official plugin from this installation of moodle."""
+    entry = _known(name)
+    if not entry.installed:
+        if as_json:
+            _emit_json({"plugin": name, "action": "not-installed", "command": None})
+        else:
+            console.print(f"[yellow]{name} is not installed.[/yellow]")
+        return
+
+    env, argv = _plan(name, keep=False)
+    output = run(argv, capture=as_json)
+
+    if as_json:
+        _emit_json(
+            {
+                "plugin": name,
+                "action": "uninstalled",
+                "environment": env.kind,
+                "command": argv,
+                "output": output,
+            }
+        )
+        return
+    console.print(f"[green]Removed[/green] {name}.")
+    if env.kind == "uv-managed":
+        console.print(
+            f"  the `{name}` extra still declares it, so installing "
+            f"`{CORE_DISTRIBUTION}[{name}]` again brings it back"
+        )
 
 
 def main() -> None:

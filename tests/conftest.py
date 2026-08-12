@@ -8,6 +8,7 @@ without committing real classmates' names or email addresses to the repository.
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,6 +18,15 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 import respx
+
+from moodle_cli import plugins
+
+# Set before anything imports moodle_cli.cli or moodle_cli.mcp_server, because those mount
+# plugins at import time -- which happens during collection, before any fixture can run.
+# The autouse fixture below cannot undo that: clearing the discovery cache does not
+# un-mount a Typer group or an MCP tool that is already registered. conftest is imported
+# ahead of every test module, so this is the last moment that is still early enough.
+os.environ.setdefault(plugins.DISABLE_ENV, "1")
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BASE_URL = "https://campus.example.edu"
@@ -63,6 +73,22 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
     monkeypatch.setattr("moodle_cli.config._ENV_LOADED", False)
     for var in ("MOODLE_URL", "MOODLE_USER", "MOODLE_PASS", "MOODLE_TOKEN"):
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_plugins(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep whatever plugins the developer has installed out of the suite.
+
+    Without this, `moodle --help` and the MCP tool list differ between a maintainer's
+    machine and CI. Autouse and opt-out rather than opt-in, because a test that forgets to
+    ask for isolation is exactly the one that passes here and fails there. The cache is
+    cleared on both sides so a discovery surviving a test cannot make the suite
+    order-dependent.
+    """
+    monkeypatch.setenv(plugins.DISABLE_ENV, "1")
+    plugins.reset()
+    yield
+    plugins.reset()
 
 
 @pytest.fixture(autouse=True)

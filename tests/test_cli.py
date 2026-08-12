@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 import respx
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from moodle_cli.cli import app
@@ -850,3 +851,39 @@ def test_course_grades_fails_loudly_without_gradebook_permission(
 
     assert result.exit_code == 1
     assert "nopermissiontoviewgrades" in result.output
+
+
+# -- the README's promise about --json -----------------------------------------------
+
+#: Core commands that act rather than answer, so they stream progress instead of JSON.
+#: The README names exactly these; a new command landing without `--json` has to either
+#: grow one or be added here and there in the same change.
+CORE_COMMANDS_WITHOUT_JSON = {
+    ("auth", "login"),
+    ("auth", "status"),
+    ("auth", "logout"),
+    ("course", "download"),
+}
+
+CORE_GROUPS = ("auth", "courses", "course", "plugins")
+
+
+def test_only_the_documented_commands_lack_json_output() -> None:
+    """The README promises `--json` on every command that answers a question.
+
+    Read off the command tree rather than out of `--help`: the rendered help is Rich's
+    to lay out, and how it wraps depends on the terminal it believes it has, so parsing
+    it makes this assert something different on a developer's machine than on a runner.
+    Plugin groups are out of scope; their own docs make their own promises.
+    """
+    groups = get_command(app).commands  # type: ignore[attr-defined]
+
+    missing: set[tuple[str, str]] = set()
+    for group_name in CORE_GROUPS:
+        assert group_name in groups, f"{group_name} is not a command group"
+        for command_name, command in groups[group_name].commands.items():
+            flags = {opt for param in command.params for opt in param.opts}
+            if "--json" not in flags:
+                missing.add((group_name, command_name))
+
+    assert missing == CORE_COMMANDS_WITHOUT_JSON

@@ -14,11 +14,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from moodle_cli.auth import resolve_token
 from moodle_cli.client import MoodleClient
-from moodle_cli.config import load_config
 from moodle_cli.downloads import download_file, plan_downloads
 from moodle_cli.errors import MoodleAPIError
+from moodle_cli.session import open_client
 
 pytestmark = pytest.mark.live
 
@@ -27,13 +26,12 @@ MAX_SMOKE_DOWNLOAD_BYTES = 2_000_000
 
 @pytest.fixture(scope="module")
 def live_client() -> MoodleClient:
-    config = load_config()
-    return MoodleClient(config.base_url, resolve_token(config))
+    return open_client()
 
 
 @pytest.fixture(scope="module")
-def live_token() -> str:
-    return resolve_token(load_config())
+def live_token(live_client: MoodleClient) -> str:
+    return live_client.token
 
 
 def test_site_info_reports_web_services_and_downloads(live_client: MoodleClient) -> None:

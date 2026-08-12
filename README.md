@@ -10,6 +10,7 @@ Works with any Moodle instance that has web services and the mobile service enab
 - [Install](#install)
 - [Authentication](#authentication)
 - [MCP server](#mcp-server)
+- [Plugins](#plugins)
 - [Command reference](#command-reference)
 - [Configuration](#configuration)
 - [Exit codes](#exit-codes)
@@ -28,6 +29,15 @@ uv sync
 
 Commands below are written as `moodle …`. Without installing the package on your PATH,
 prefix them with `uv run`, as in `uv run moodle courses list`.
+
+To install it on your PATH instead of working from a checkout:
+
+```bash
+uv tool install moodle-cli
+```
+
+`uv sync` in a checkout installs the core alone, on purpose: the default test run has to
+prove that moodle-cli works with no plugins present.
 
 ## Authentication
 
@@ -57,14 +67,32 @@ claude mcp add moodle -- uv run --project /path/to/moodle-cli moodle-mcp
 Each MCP tool and its CLI counterpart are documented together — see the command reference
 below.
 
+## Plugins
+
+Campuses differ in ways that do not belong in this tool: a recordings platform one
+university uses, a conversion step another wants. A plugin is a separate package that adds
+its own command group and its own MCP tools. It cannot wrap, replace or modify anything
+here, which is what keeps the behavior of every command below readable from this repository
+alone.
+
+```bash
+moodle plugins list
+moodle plugins install NAME
+```
+
+Nothing is installed by default, and a plugin that fails to load is skipped rather than
+taken as fatal. See [docs/plugins.md](docs/plugins.md).
+
 ## Command reference
 
-Every read command accepts `--json`, which prints machine-readable output instead of a
-table. Commands that take a course accept either its numeric id or a shortname prefix; a
+Every command that answers a question accepts `--json`, which prints machine-readable
+output instead of a table. The ones that act rather than answer do not: `auth login`,
+`auth status`, `auth logout` and `course download` report progress as they go.
+Commands that take a course accept either its numeric id or a shortname prefix; a
 prefix matching more than one course is an error listing the candidates.
 
 Each group below links to a docs page with full options, MCP parameters and behavioral
-notes.
+notes. An installed plugin adds a group of its own; `moodle plugins list` shows which.
 
 ### [Authentication](docs/auth.md)
 
@@ -73,6 +101,14 @@ notes.
 | `moodle auth login` | Mint a token and store it in the keyring. |
 | `moodle auth status` | Show who the stored token belongs to, and what it can do. |
 | `moodle auth logout` | Delete the stored token. |
+
+### [Plugins](docs/plugins.md)
+
+| CLI | MCP tool | Description |
+| --- | --- | --- |
+| `moodle plugins list` | — | List the official plugins and what each one adds. |
+| `moodle plugins install` | — | Install a plugin into this installation of moodle. |
+| `moodle plugins uninstall` | — | Remove a plugin. |
 
 ### [Browsing and searching courses](docs/courses.md)
 
@@ -171,6 +207,11 @@ next morning in Rome. Every MCP timestamp therefore carries its offset, `due_at`
 `closes_at` included. The CLI tables still print a date, which is the right granularity to
 read at a glance and the wrong one to compute a deadline from.
 
+**A broken plugin is skipped, not fatal.** A plugin that fails to import, targets a
+different contract version, or claims a command name this tool owns is left out with a
+warning while everything else keeps working. Set `MOODLE_NO_PLUGINS=1` to skip discovery
+altogether, which is the way out if a plugin manages to break the command line itself.
+
 See each docs page linked above for behavior specific to one command or tool.
 
 ## Development
@@ -179,9 +220,13 @@ See each docs page linked above for behavior specific to one command or tool.
 uv run pytest           # unit tests, no network
 uv run pytest --live    # integration tests against a real campus
 uv run ruff check .
+uv run ruff format .
 uv run mypy
 ```
 
 Unit-test fixtures are synthetic but shape-accurate, reproducing the quirks real campuses
 return without committing anyone's personal data. The `--live` suite needs credentials in
 the environment and is what catches a campus changing its API underneath the fixtures.
+
+The suite runs with plugin discovery disabled, so whatever you have installed cannot change
+what it proves. Tests that need a plugin construct a fake one.
