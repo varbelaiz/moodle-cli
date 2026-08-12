@@ -627,3 +627,45 @@ def test_download_link_skips_when_already_present(slides_link: CourseFile, tmp_p
 
     assert result.status is DownloadStatus.SKIPPED
     assert route.call_count == 0
+
+
+@respx.mock
+def test_download_link_skips_an_opaque_drive_file_already_present(
+    drive_link: CourseFile, tmp_path: Path
+) -> None:
+    """An opaque Drive file's real destination isn't known until headers arrive, so the
+    skip check runs after that -- not upfront like it does for a known-extension export."""
+    route = respx.get(_DRIVE_UC_URL).mock(
+        return_value=httpx.Response(
+            200,
+            content=b"new bytes",
+            headers={"content-disposition": 'attachment; filename="zonaprop-clase.zip"'},
+        )
+    )
+    existing = tmp_path / "zonaprop-clase.zip"
+    existing.write_bytes(b"already on disk")
+    placeholder = tmp_path / "Zonaprop demo"
+
+    with httpx.Client() as http:
+        result = download_link(http, drive_link, placeholder)
+
+    assert result.status is DownloadStatus.SKIPPED
+    assert result.path == existing
+    assert existing.read_bytes() == b"already on disk"
+    assert route.call_count == 1
+    assert not placeholder.exists()
+
+
+@respx.mock
+def test_download_link_reports_a_native_export_permission_page_distinctly(
+    slides_link: CourseFile, tmp_path: Path
+) -> None:
+    """A Docs/Slides/Sheets permission page is not Drive's virus-scan warning page."""
+    respx.get(_SLIDES_EXPORT_URL).mock(
+        return_value=httpx.Response(
+            200, content=b"<html>request access</html>", headers={"content-type": "text/html"}
+        )
+    )
+
+    with httpx.Client() as http, pytest.raises(DownloadError, match="HTML page instead"):
+        download_link(http, slides_link, tmp_path / "Clase 1.pptx")

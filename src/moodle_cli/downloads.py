@@ -428,6 +428,11 @@ def download_link(
     page for the same reason (still 200, but no confirm token to find). Both are reported as
     a `DownloadError` naming the cause, not left to `httpx`'s generic status exception, which
     the caller doesn't catch and would otherwise abort every other planned download too.
+
+    An opaque Drive/Colab file's real name -- and so its final destination -- isn't known
+    until the response headers arrive, so the already-downloaded check for those can't run
+    upfront like it does for a native export with a deterministic extension; it runs once the
+    real destination is resolved instead, before any bytes are written.
     """
     export = _classify_google_url(link.fileurl or "")
     if export is None:
@@ -440,8 +445,9 @@ def download_link(
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     request_url, params = export.export_url, None
+    retried = False
 
-    for attempt in range(2):
+    while True:
         with http.stream("GET", request_url, params=params) as response:
             if response.is_error:
                 hint = (
@@ -460,17 +466,25 @@ def download_link(
                         f"{link.filename}: Drive redirected to a Google sign-in page "
                         '-- the file likely is not shared "anyone with the link"'
                     )
-                if attempt or export.drive_id is None:
+                if export.drive_id is None:
+                    raise DownloadError(
+                        f"{link.filename}: Google returned an HTML page instead of the export "
+                        '-- the doc likely is not shared "anyone with the link"'
+                    )
+                if retried:
                     raise DownloadError(
                         f"{link.filename}: Drive served a warning page instead of the file"
                     )
                 request_url, params = _confirm_retry(export.drive_id, response.text, link)
+                retried = True
                 continue
 
             final = _resolve_link_filename(destination, export, response)
+            if not overwrite and final.exists() and final.stat().st_size:
+                return DownloadResult(
+                    path=final, status=DownloadStatus.SKIPPED, size=final.stat().st_size
+                )
             return _write_link_to_disk(response, final, link)
-
-    raise DownloadError(f"{link.filename}: Drive served a warning page instead of the file")
 
 
 def _confirm_retry(
