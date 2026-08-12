@@ -39,5 +39,12 @@ def convert_file(source: Path) -> Converted:
         raise ConversionError(f"{source}: {exc}") from exc
 
     markdown_path = source.with_name(f"{source.name}.md")
-    markdown_path.write_text(markdown, encoding="utf-8")
+    try:
+        markdown_path.write_text(markdown, encoding="utf-8")
+    # Every way out of this function is a ConversionError, so one unwritable destination
+    # costs its own file and no more. Left to escape, an OSError here would abort a batch
+    # partway and reach the user as a traceback: `main` only turns MoodleError into a
+    # clean exit, and a plugin's exception is not one.
+    except OSError as exc:
+        raise ConversionError(f"{markdown_path}: could not write the markdown ({exc})") from exc
     return Converted(source, markdown, markdown_path)

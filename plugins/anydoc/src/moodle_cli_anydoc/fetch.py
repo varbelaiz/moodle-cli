@@ -40,9 +40,23 @@ def fetch_and_convert(course: str, filename: str, *, section: int | None = None)
         raise ValueError(f"{filename!r}: no such file in {resolved.shortname}")
     if len(planned) > 1:
         sections = sorted({item.section.section for item in planned})
+        if len(sections) > 1:
+            raise ValueError(
+                f"{filename!r} matches {len(planned)} files in {resolved.shortname} "
+                f"across sections {sections}; narrow with section"
+            )
+        # One section holds them all, so `section` has nothing left to narrow: two
+        # activities in it carry the same filename at different sizes, which is what
+        # `course download` handles by keeping both under distinct names. Sending the
+        # caller back to `section` would hand them this same error again.
+        activities = ", ".join(
+            f"{item.module.name!r} ({item.file.filesize} bytes)" for item in planned
+        )
         raise ValueError(
-            f"{filename!r} matches {len(planned)} files in {resolved.shortname} "
-            f"across sections {sections}; narrow with section"
+            f"{filename!r} matches {len(planned)} files in section {sections[0]} of "
+            f"{resolved.shortname}, from {activities}. Section cannot tell them apart; "
+            f'fetch them with `moodle course download {resolved.shortname} --file "{filename}"` '
+            f"and convert them with `moodle anydoc convert`."
         )
 
     item = planned[0]
