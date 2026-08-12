@@ -27,7 +27,7 @@ from moodle_cli.downloads import (
     sanitize,
 )
 from moodle_cli.errors import MoodleError
-from moodle_cli.models import html_to_text
+from moodle_cli.models import Module, html_to_text
 from moodle_cli.plugins import register_tools
 from moodle_cli.search import search_contents
 from moodle_cli.session import open_client
@@ -75,6 +75,33 @@ def list_courses(view: View = "all", sort: Sort = "name") -> list[dict[str, Any]
         ]
 
 
+def _module_payload(module: Module) -> dict[str, Any]:
+    """A module's display name plus any teacher-written instructions attached to it.
+
+    A ``label`` module carries its entire text in ``description``; ``name`` is a preview
+    Moodle itself truncates to about 50 characters, so ``description`` replaces it there.
+    Other module types keep a real title in ``name`` and, when a teacher enabled "show
+    description", pair it with instructions Moodle displays below the title on the course
+    page (e.g. a submission window, or which of two file versions is current) — reported
+    separately so a real title is never dropped in favor of added text.
+    """
+    is_label = module.modname == "label"
+    name = (module.description_text if is_label else module.name) or module.name
+    payload = {
+        "name": name,
+        "type": module.modname,
+        "url": module.url,
+        "files": [
+            {"filename": f.filename, "size": f.filesize, "mimetype": f.mimetype}
+            for f in module.files
+        ],
+        "links": [{"name": link.filename, "url": link.fileurl} for link in module.links],
+    }
+    if not is_label and module.description_text and module.description_text != name:
+        payload["description"] = module.description_text
+    return payload
+
+
 @mcp.tool()
 def get_course_contents(course: str) -> dict[str, Any]:
     """Show a course's sections, activities, available files and external links.
@@ -84,6 +111,9 @@ def get_course_contents(course: str) -> dict[str, Any]:
     download_course_files, optionally narrowing by section number or module type.
     Link entries (a "url" module's actual destination, e.g. a recorded-class or
     external-site link) are informational only — nothing downloads them.
+    A section's `summary` and a module's `description` carry free-text instructions a
+    teacher wrote (a due window, which file version is current, etc.) — read them, they
+    are often the only place that information appears.
     """
     client = open_client()
     with client:
@@ -100,21 +130,8 @@ def get_course_contents(course: str) -> dict[str, Any]:
             {
                 "number": section.section,
                 "name": section.name,
-                "modules": [
-                    {
-                        "name": module.name,
-                        "type": module.modname,
-                        "url": module.url,
-                        "files": [
-                            {"filename": f.filename, "size": f.filesize, "mimetype": f.mimetype}
-                            for f in module.files
-                        ],
-                        "links": [
-                            {"name": link.filename, "url": link.fileurl} for link in module.links
-                        ],
-                    }
-                    for module in section.modules
-                ],
+                "summary": section.summary_text,
+                "modules": [_module_payload(module) for module in section.modules],
             }
             for section in sections
         ],

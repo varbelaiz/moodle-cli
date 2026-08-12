@@ -121,6 +121,9 @@ class Module(_Base):
     url: str | None = None
     visible: bool = True
     uservisible: bool = True
+    #: Full HTML body. ``name`` is a preview Moodle itself truncates to ~50 chars for
+    #: modules like ``label`` that carry their entire content in this field.
+    description: _Text = ""
     contents: list[CourseFile] = Field(default_factory=list)
 
     @property
@@ -136,6 +139,10 @@ class Module(_Base):
         """
         return [c for c in self.contents if c.type == "url" and c.fileurl]
 
+    @property
+    def description_text(self) -> str:
+        return html_to_text(self.description)
+
 
 class Section(_Base):
     id: int
@@ -143,8 +150,12 @@ class Section(_Base):
     section: int = 0
     visible: bool = True
     uservisible: bool = True
-    summary: str = ""
+    summary: _Text = ""
     modules: list[Module] = Field(default_factory=list)
+
+    @property
+    def summary_text(self) -> str:
+        return html_to_text(self.summary)
 
 
 class Role(_Base):
