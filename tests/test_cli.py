@@ -342,6 +342,49 @@ def test_contents_shows_a_url_modules_target_as_a_link(
     assert "https://slack.example.com/join" in result.output
 
 
+@respx.mock
+def test_contents_shows_the_section_summary_and_a_labels_full_text(
+    courses_payload: dict[str, Any], contents_payload: list[dict[str, Any]]
+) -> None:
+    """A section's date range and a label's full body live outside ``name``.
+
+    ``name`` is a preview Moodle itself truncates for label modules; the section's date
+    range lives in ``summary``, a separate field ``course contents`` used to drop
+    entirely. Both are what a student actually needs to know what is due this week.
+    """
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(app, ["course", "contents", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "1 de marzo - 7 de marzo" in result.output
+    assert "Repasar el apunte de la unidad 2." in result.output
+
+
+@respx.mock
+def test_contents_appends_a_non_labels_description_below_its_real_title(
+    courses_payload: dict[str, Any], contents_payload: list[dict[str, Any]]
+) -> None:
+    """A resource, unlike a label, has a real title — the description is extra context.
+
+    Both must show: the title identifies which file this is, and a description a teacher
+    attached (e.g. "there's a newer version") is easy to miss if only the title prints.
+    """
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+
+    result = runner.invoke(app, ["course", "contents", "IOS460"])
+
+    assert result.exit_code == 0
+    assert "Ejercicios Unidad 2 v1" in result.output
+    assert "Hay una versión más nueva en la carpeta de la semana 5." in result.output
+
+
 # -- search ---------------------------------------------------------------------------
 
 

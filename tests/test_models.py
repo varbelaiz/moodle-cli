@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from moodle_cli.models import Announcement, epoch_to_datetime, html_to_text
+from moodle_cli.models import Announcement, Module, Section, epoch_to_datetime, html_to_text
 
 # Two paragraphs, a line break, a list and two entities: everything a real forum post
 # throws at the converter, in one string.
@@ -56,3 +56,27 @@ def test_epoch_to_datetime_resolves_to_local_wall_clock() -> None:
 
 def test_epoch_to_datetime_reads_zero_as_unset() -> None:
     assert epoch_to_datetime(0) is None
+
+
+def test_module_description_text_is_plain_text() -> None:
+    """A label module's whole body lives in ``description``; ``name`` is a Moodle-side
+    preview truncated to about 50 characters and cut mid-word."""
+    module = Module.model_validate(
+        {
+            "id": 1,
+            "name": "ANTES DE LA PRÓXIMA CLASE Repasar el ap...",
+            "modname": "label",
+            "description": "<p><strong>ANTES DE LA PRÓXIMA CLASE</strong></p>"
+            "<ul><li>Repasar el apunte de la unidad 2.</li></ul>",
+        }
+    )
+    assert module.description_text == (
+        "ANTES DE LA PRÓXIMA CLASE\nRepasar el apunte de la unidad 2."
+    )
+
+
+def test_section_summary_text_is_plain_text() -> None:
+    section = Section.model_validate(
+        {"id": 1, "name": "Semana 1", "summary": "<p>1 de marzo - 7 de marzo</p>"}
+    )
+    assert section.summary_text == "1 de marzo - 7 de marzo"
