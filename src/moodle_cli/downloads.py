@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import TypeVar
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
 import httpx
@@ -259,24 +260,28 @@ def plan_downloads(
     return planned
 
 
+_Identity = TypeVar("_Identity")
+
+
 def _claim(
-    destination: Path, filesize: int, module_id: int, claimed: dict[Path, int]
+    destination: Path, identity: _Identity, module_id: int, claimed: dict[Path, _Identity]
 ) -> Path | None:
     """Resolve a destination against the paths already claimed by this plan.
 
     Two activities in one section can point at the same filename. Teachers duplicate
-    activities, so the usual case is byte-identical copies, which collapse to one file.
-    When the sizes differ they are genuinely different documents, and the second is renamed
-    rather than allowed to overwrite the first. Returns None when the entry is a duplicate.
+    activities, so the usual case is an identical `identity` (a file's byte size, or a
+    link's resolved export URL), which collapses to one entry. When identities differ
+    they are genuinely different documents, and the second is renamed rather than
+    allowed to overwrite the first. Returns None when the entry is a duplicate.
     """
     candidate = destination
     suffix = 0
     while True:
         existing = claimed.get(candidate)
         if existing is None:
-            claimed[candidate] = filesize
+            claimed[candidate] = identity
             return candidate
-        if existing == filesize:
+        if existing == identity:
             return None
         suffix += 1
         stem = (
@@ -323,9 +328,10 @@ def plan_link_downloads(
 
         stem = sanitize(link.filename, fallback="link")
         filename = f"{stem}.{export.extension}" if export.extension else stem
-        destination = _claim_link(
-            root.joinpath(*parts, filename), export.export_url, module.id, claimed
-        )
+        # Every link's `filesize` is 0, so it can't disambiguate two activities sharing a
+        # display name the way `plan_downloads` does -- the resolved export URL identifies
+        # the link instead.
+        destination = _claim(root.joinpath(*parts, filename), export.export_url, module.id, claimed)
         if destination is None:
             continue
 
@@ -333,33 +339,6 @@ def plan_link_downloads(
             PlannedLink(link=link, section=section, module=module, destination=destination)
         )
     return planned
-
-
-def _claim_link(
-    destination: Path, export_url: str, module_id: int, claimed: dict[Path, str]
-) -> Path | None:
-    """Resolve a link's destination against the links already claimed by this plan.
-
-    Every link's `filesize` is 0, so `_claim`'s byte-identity check can't tell two
-    activities with the same display name apart -- the resolved export URL is the
-    identity here instead. Returns None when the entry is a duplicate.
-    """
-    candidate = destination
-    suffix = 0
-    while True:
-        existing = claimed.get(candidate)
-        if existing is None:
-            claimed[candidate] = export_url
-            return candidate
-        if existing == export_url:
-            return None
-        suffix += 1
-        stem = (
-            f"{destination.stem} ({module_id})"
-            if suffix == 1
-            else (f"{destination.stem} ({module_id}-{suffix})")
-        )
-        candidate = destination.with_name(f"{stem}{destination.suffix}")
 
 
 def download_file(
