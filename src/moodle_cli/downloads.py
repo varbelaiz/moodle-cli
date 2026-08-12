@@ -293,11 +293,15 @@ def plan_link_downloads(
     *,
     only_sections: set[int] | None = None,
     only_modtypes: set[str] | None = None,
+    only_names: Collection[str] | None = None,
+    only_patterns: Collection[str] | None = None,
 ) -> list[PlannedLink]:
     """Map course links onto destination paths, mirroring `plan_downloads`' directory layout.
 
     Only Google-hosted links are planned; `_classify_google_url` returning None for
     everything else (GitHub, Slack, YouTube, ...) is the skip signal, not an error.
+    `only_names`/`only_patterns` match against `link.filename`, which is the activity's
+    display name rather than a real filename -- the same value `course contents` shows.
     """
     planned: list[PlannedLink] = []
     claimed: dict[Path, str] = {}
@@ -306,6 +310,8 @@ def plan_link_downloads(
         if only_sections is not None and section.section not in only_sections:
             continue
         if only_modtypes is not None and module.modname not in only_modtypes:
+            continue
+        if not matches_selection(link.filename, only_names, only_patterns):
             continue
         export = _classify_google_url(link.fileurl or "")
         if export is None:
