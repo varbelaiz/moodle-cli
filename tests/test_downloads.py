@@ -319,6 +319,21 @@ def test_classify_drive_file_has_no_known_extension() -> None:
     assert export.drive_id == "DRIVE1"
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://drive.google.com/open?id=DRIVE1",
+        "https://drive.google.com/uc?id=DRIVE1",
+    ],
+)
+def test_classify_drive_file_from_a_query_string_id(url: str) -> None:
+    """The legacy share-link forms carry the id in the query string, not the path."""
+    export = _classify_google_url(url)
+    assert export is not None
+    assert export.export_url == "https://drive.google.com/uc?export=download&id=DRIVE1"
+    assert export.drive_id == "DRIVE1"
+
+
 def test_classify_colab_notebook_reuses_the_drive_uc_endpoint() -> None:
     export = _classify_google_url("https://colab.research.google.com/drive/COLAB1?usp=sharing")
     assert export is not None
