@@ -8,6 +8,7 @@ state every time, and anything the user injected by hand is carried across untou
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -51,11 +52,24 @@ def detect() -> Environment:
 
 
 def _is_editable() -> bool:
-    """Whether the core is installed from a source checkout rather than a built wheel."""
+    """Whether the core is installed from a source checkout rather than a built wheel.
+
+    The presence of ``direct_url.json`` is not the question: PEP 610 writes it for any
+    install that names a source directly, including a local wheel and a git URL. Only
+    ``dir_info.editable`` says the install points back at a checkout, which is what makes
+    changing extras here the wrong move.
+    """
     try:
-        return distribution(CORE_DISTRIBUTION).read_text("direct_url.json") is not None
+        raw = distribution(CORE_DISTRIBUTION).read_text("direct_url.json")
     except (PackageNotFoundError, OSError):
         return False
+    if not raw:
+        return False
+    try:
+        direct_url = json.loads(raw)
+    except ValueError:
+        return False
+    return bool(direct_url.get("dir_info", {}).get("editable", False))
 
 
 def _is_uv_tool(uv: str) -> bool:

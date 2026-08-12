@@ -45,6 +45,16 @@ _EXTRA_MARKER = re.compile(r"""extra\s*==\s*['"]([A-Za-z0-9._-]+)['"]""")
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
+def requirement_name(requirement: str) -> str:
+    """The distribution a requirement names, without its version specifier.
+
+    Every specifier, not just ``==``: a package injected as ``name>=1.0`` names the same
+    distribution as ``name==1.0``, and comparing the two strings would say otherwise.
+    """
+    match = _REQUIREMENT_NAME.match(requirement)
+    return match.group(1) if match else requirement
+
+
 class Plugin:
     """Base class for a moodle-cli plugin.
 
@@ -174,8 +184,22 @@ def mount_commands(app: typer.Typer) -> None:
         except Exception as exc:
             log.warning("Plugin %r failed to build its commands (%s).", entry.name, exc)
             continue
-        if group is not None:
-            app.add_typer(group, name=entry.name)
+        if group is None:
+            continue
+        # Checked here rather than left to Typer: `add_typer` stores whatever it is given
+        # and the wrong type only surfaces later, while Click builds the command tree,
+        # which happens on every invocation including `--help`. Returning a click.Group is
+        # the easy mistake, and it would take the whole CLI down with it.
+        import typer
+
+        if not isinstance(group, typer.Typer):
+            log.warning(
+                "Plugin %r offered %s rather than a typer.Typer; skipping its commands.",
+                entry.name,
+                type(group).__name__,
+            )
+            continue
+        app.add_typer(group, name=entry.name)
 
 
 def register_tools(mcp: FastMCP) -> None:
