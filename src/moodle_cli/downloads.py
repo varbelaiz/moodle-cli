@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from fnmatch import fnmatch
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, parse_qs, urlparse
 
 import httpx
 
@@ -134,6 +134,19 @@ def iter_course_links(sections: list[Section]) -> Iterator[tuple[Section, Module
                 yield section, module, link
 
 
+def _drive_file_id(parsed: ParseResult) -> str | None:
+    """Pull a Drive file id out of either URL shape Moodle links carry.
+
+    ``/file/d/<id>/view`` (current share links) carries the id in the path; the older
+    ``open?id=<id>`` and ``uc?id=<id>`` forms carry it in the query string instead.
+    """
+    match = _DOC_ID.search(parsed.path)
+    if match:
+        return match.group(1)
+    query_id = parse_qs(parsed.query).get("id")
+    return query_id[0] if query_id else None
+
+
 def _classify_google_url(url: str) -> _GoogleExport | None:
     """Map a course link to how to fetch it, or None if it isn't a recognized Google host.
 
@@ -156,10 +169,9 @@ def _classify_google_url(url: str) -> _GoogleExport | None:
         return _GoogleExport(export_url=export_url, extension=extension)
 
     if host == "drive.google.com":
-        match = _DOC_ID.search(parsed.path)
-        if not match:
+        drive_id = _drive_file_id(parsed)
+        if drive_id is None:
             return None
-        drive_id = match.group(1)
         return _GoogleExport(
             export_url=_DRIVE_EXPORT_URL.format(id=drive_id), extension=None, drive_id=drive_id
         )
