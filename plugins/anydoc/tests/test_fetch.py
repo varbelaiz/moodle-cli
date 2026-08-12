@@ -130,6 +130,29 @@ def test_fetch_and_convert_raises_when_the_name_is_ambiguous(
         fetch_and_convert("IOS460", "notes.csv")
 
 
+def test_an_ambiguity_inside_one_section_does_not_point_at_section(
+    tmp_cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A duplicated activity puts both copies in one section, where `section` cannot help.
+
+    `plan_downloads` keeps both, renaming the second, so the match stays ambiguous however
+    the caller narrows it. Repeating "narrow with section" would hand back this same error.
+    """
+    url_a = f"{BASE_URL}/webservice/pluginfile.php/1/mod_resource/content/1/notes.csv"
+    url_b = f"{BASE_URL}/webservice/pluginfile.php/1/mod_resource/content/2/notes.csv"
+    sections = [_section(1, ("notes.csv", 10, url_a), ("notes.csv", 20, url_b))]
+    client = FakeClient(sections, _course())
+    monkeypatch.setattr(fetch_module, "open_client", lambda: client)
+
+    with pytest.raises(ValueError) as excinfo:
+        fetch_and_convert("IOS460", "notes.csv")
+
+    message = str(excinfo.value)
+    assert "narrow with section" not in message, "section cannot narrow this one"
+    assert "10 bytes" in message and "20 bytes" in message, "name what actually differs"
+    assert "course download" in message, "point at the way out that exists"
+
+
 def test_fetch_and_convert_narrows_an_ambiguous_name_with_section(
     tmp_cwd: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
