@@ -541,6 +541,29 @@ def test_download_link_resolves_filename_from_content_disposition(
 
 
 @respx.mock
+def test_download_link_resolves_filename_from_rfc5987_content_disposition(
+    drive_link: CourseFile, tmp_path: Path
+) -> None:
+    """Drive sends the extended `filename*=` form for names outside ASCII."""
+    respx.get(_DRIVE_UC_URL).mock(
+        return_value=httpx.Response(
+            200,
+            content=b"zip bytes",
+            headers={
+                "content-disposition": "attachment; filename*=UTF-8''Gu%C3%ADa%20de%20lectura.zip"
+            },
+        )
+    )
+    placeholder = tmp_path / "Zonaprop demo"
+
+    with httpx.Client() as http:
+        result = download_link(http, drive_link, placeholder)
+
+    assert result.path == tmp_path / "Guía de lectura.zip"
+    assert result.path.read_bytes() == b"zip bytes"
+
+
+@respx.mock
 def test_download_link_falls_back_to_mimetype_when_no_content_disposition(
     drive_link: CourseFile, tmp_path: Path
 ) -> None:
