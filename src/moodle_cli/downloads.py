@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from fnmatch import fnmatch
 from pathlib import Path
-from urllib.parse import ParseResult, parse_qs, urlparse
+from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
 import httpx
 
@@ -40,6 +40,7 @@ _DRIVE_CONFIRM_URL = "https://drive.usercontent.google.com/download"
 _CONFIRM_TOKEN = re.compile(r'name="confirm"\s+value="([^"]+)"')
 _CONFIRM_UUID = re.compile(r'name="uuid"\s+value="([^"]+)"')
 _CONTENT_DISPOSITION_FILENAME = re.compile(r'filename="([^"]+)"')
+_CONTENT_DISPOSITION_FILENAME_EXT = re.compile(r"filename\*=UTF-8''([^;]+)", re.IGNORECASE)
 _MIME_EXTENSIONS = {
     "application/pdf": "pdf",
     "application/zip": "zip",
@@ -518,6 +519,20 @@ def _confirm_retry(
     return _DRIVE_CONFIRM_URL, params
 
 
+def _content_disposition_filename(disposition: str) -> str | None:
+    """Extract the real filename from a Content-Disposition header.
+
+    The RFC 5987 ``filename*=UTF-8''...`` form takes precedence over the legacy quoted
+    ``filename="..."`` form when both are present (RFC 6266); Drive sends the extended
+    form for names outside ASCII.
+    """
+    match = _CONTENT_DISPOSITION_FILENAME_EXT.search(disposition)
+    if match:
+        return unquote(match.group(1))
+    match = _CONTENT_DISPOSITION_FILENAME.search(disposition)
+    return match.group(1) if match else None
+
+
 def _resolve_link_filename(
     destination: Path, export: _GoogleExport, response: httpx.Response
 ) -> Path:
@@ -526,9 +541,9 @@ def _resolve_link_filename(
         return destination
 
     disposition = response.headers.get("content-disposition", "")
-    match = _CONTENT_DISPOSITION_FILENAME.search(disposition)
-    if match:
-        name = sanitize(dedupe_extension(match.group(1)), fallback=destination.name)
+    raw_name = _content_disposition_filename(disposition)
+    if raw_name:
+        name = sanitize(dedupe_extension(raw_name), fallback=destination.name)
         return destination.with_name(name)
 
     content_type = response.headers.get("content-type", "").split(";")[0].strip()
