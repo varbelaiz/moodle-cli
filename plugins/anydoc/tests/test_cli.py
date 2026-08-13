@@ -44,6 +44,23 @@ def test_convert_command_keeps_going_after_one_failure(tmp_path: Path) -> None:
     assert (tmp_path / "grades.csv.md").exists()
 
 
+def test_convert_command_ocr_flag_reaches_convert_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_convert_file(path: Path, *, ocr: bool = False) -> Converted:
+        seen["ocr"] = ocr
+        return Converted(path, "ok", path.with_name(f"{path.name}.md"))
+
+    monkeypatch.setattr(cli_module, "convert_file", fake_convert_file)
+
+    result = runner.invoke(app, ["convert", "--ocr", str(tmp_path / "scan.pdf")])
+
+    assert result.exit_code == 0
+    assert seen["ocr"] is True
+
+
 # -- fetch -------------------------------------------------------------------------
 
 
@@ -52,7 +69,7 @@ def test_fetch_command_reports_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         cli_module,
         "fetch_and_convert",
-        lambda course, filename, section=None: converted,
+        lambda course, filename, section=None, ocr=False: converted,
     )
 
     result = runner.invoke(app, ["fetch", "IOS460", "grades.csv"])
@@ -64,7 +81,9 @@ def test_fetch_command_reports_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_fetch_command_reports_a_clean_error_on_no_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def raise_not_found(course: str, filename: str, section: int | None = None) -> Converted:
+    def raise_not_found(
+        course: str, filename: str, section: int | None = None, ocr: bool = False
+    ) -> Converted:
         raise ValueError(f"{filename!r}: no such file in {course}")
 
     monkeypatch.setattr(cli_module, "fetch_and_convert", raise_not_found)
@@ -78,7 +97,9 @@ def test_fetch_command_reports_a_clean_error_on_no_match(
 def test_fetch_command_passes_the_section_option(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, object] = {}
 
-    def fake_fetch_and_convert(course: str, filename: str, section: int | None = None) -> Converted:
+    def fake_fetch_and_convert(
+        course: str, filename: str, section: int | None = None, ocr: bool = False
+    ) -> Converted:
         seen["section"] = section
         return Converted(Path("a.csv"), "ok", Path("a.csv.md"))
 
@@ -88,3 +109,22 @@ def test_fetch_command_passes_the_section_option(monkeypatch: pytest.MonkeyPatch
 
     assert result.exit_code == 0
     assert seen["section"] == 2
+
+
+def test_fetch_command_ocr_flag_reaches_fetch_and_convert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_fetch_and_convert(
+        course: str, filename: str, section: int | None = None, ocr: bool = False
+    ) -> Converted:
+        seen["ocr"] = ocr
+        return Converted(Path("a.pdf"), "ok", Path("a.pdf.md"))
+
+    monkeypatch.setattr(cli_module, "fetch_and_convert", fake_fetch_and_convert)
+
+    result = runner.invoke(app, ["fetch", "IOS460", "scan.pdf", "--ocr"])
+
+    assert result.exit_code == 0
+    assert seen["ocr"] is True
