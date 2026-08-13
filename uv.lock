@@ -14,6 +14,7 @@ resolution-markers = [
 members = [
     "moodle-cli",
     "moodle-cli-anydoc",
+    "moodle-cli-panopto",
 ]
 
 [[package]]
@@ -610,6 +611,9 @@ dependencies = [
 anydoc = [
     { name = "moodle-cli-anydoc" },
 ]
+panopto = [
+    { name = "moodle-cli-panopto" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -625,12 +629,13 @@ requires-dist = [
     { name = "keyring", specifier = ">=25.0" },
     { name = "mcp", specifier = ">=1.2" },
     { name = "moodle-cli-anydoc", marker = "extra == 'anydoc'", editable = "plugins/anydoc" },
+    { name = "moodle-cli-panopto", marker = "extra == 'panopto'", editable = "plugins/panopto" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["anydoc"]
+provides-extras = ["anydoc", "panopto"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -653,6 +658,21 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "firecrawl-anydoc", specifier = ">=0.1.4" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "moodle-cli", editable = "." },
+]
+
+[[package]]
+name = "moodle-cli-panopto"
+version = "0.1.0"
+source = { editable = "plugins/panopto" }
+dependencies = [
+    { name = "httpx" },
+    { name = "moodle-cli" },
+]
+
+[package.metadata]
+requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "moodle-cli", editable = "." },
 ]
