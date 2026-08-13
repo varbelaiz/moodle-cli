@@ -21,6 +21,12 @@ runner = CliRunner()
 pytestmark = pytest.mark.usefixtures("configured_env")
 
 
+def _local_date(epoch: int) -> str:
+    moment = epoch_to_datetime(epoch)
+    assert moment is not None
+    return moment.strftime("%Y-%m-%d")
+
+
 @respx.mock
 def test_courses_list_renders_a_table(courses_payload: dict[str, Any]) -> None:
     route_by_function(core_course_get_enrolled_courses_by_timeline_classification=courses_payload)
@@ -508,7 +514,7 @@ def test_assignments_lists_due_dates(
     assert result.exit_code == 0
     assert "Actividad semana 1" in result.output
     assert "40393" in result.output
-    assert "2026-03-11" in result.output
+    assert _local_date(1773244800) in result.output
 
 
 @respx.mock
@@ -542,7 +548,9 @@ def test_courses_assignments_spans_every_course_by_due_date(
     assert result.exit_code == 0
     assert "IOS460 - 123246" in result.output
     # The earlier deadline comes first, whatever order the campus listed them in.
-    assert result.output.index("2026-02-25") < result.output.index("2026-03-11")
+    assert result.output.index(_local_date(1772035200)) < result.output.index(
+        _local_date(1773244800)
+    )
 
 
 @respx.mock
@@ -580,14 +588,14 @@ def test_a_null_optional_field_fails_as_a_message_not_a_traceback(
 def test_an_extension_date_reads_in_the_same_zone_as_every_other_date(
     submission_status_payload: dict[str, Any],
 ) -> None:
-    """2026-03-12 01:00Z is still the 11th locally, which is the day the campus shows."""
+    """An extension date is rendered in the same local zone as every other date."""
     submission_status_payload["lastattempt"]["extensionduedate"] = 1773277200
     route_by_function(mod_assign_get_submission_status=submission_status_payload)
 
     result = runner.invoke(app, ["course", "assignment-status", "40393"])
 
     assert result.exit_code == 0
-    assert "extension until: 2026-03-11" in result.output
+    assert f"extension until: {_local_date(1773277200)}" in result.output
 
 
 @respx.mock
@@ -604,7 +612,7 @@ def test_quizzes_lists_close_dates_and_attempt_limits(
     assert result.exit_code == 0
     assert "Actividad semana 2" in result.output
     assert "42628" in result.output
-    assert "2026-03-19" in result.output
+    assert _local_date(1773954000) in result.output
     assert "10.0" in result.output
 
 
