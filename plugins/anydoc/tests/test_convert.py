@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from moodle_cli_anydoc import convert as convert_module
 from moodle_cli_anydoc.convert import ConversionError, convert_file
 
 
@@ -68,3 +69,56 @@ def test_convert_file_raises_on_an_unconvertible_file(tmp_path: Path) -> None:
 
     with pytest.raises(ConversionError):
         convert_file(broken)
+
+
+# -- ocr=True ------------------------------------------------------------------------
+
+
+def test_convert_file_ocr_without_a_key_fails_without_touching_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"%PDF-fake")
+    monkeypatch.setattr(convert_module, "resolve_firecrawl_key", lambda: None)
+
+    def fail_if_called(source: Path, api_key: str) -> str:
+        raise AssertionError("convert_hosted must not run without a key")
+
+    monkeypatch.setattr(convert_module, "convert_hosted", fail_if_called)
+
+    with pytest.raises(ConversionError, match="FIRECRAWL_KEY"):
+        convert_file(source, ocr=True)
+
+
+def test_convert_file_ocr_delegates_to_the_hosted_converter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"%PDF-fake")
+    monkeypatch.setattr(convert_module, "resolve_firecrawl_key", lambda: "fc-test-key")
+    monkeypatch.setattr(
+        convert_module, "convert_hosted", lambda source, api_key: "# Recovered by OCR"
+    )
+
+    result = convert_file(source, ocr=True)
+
+    assert result.markdown == "# Recovered by OCR"
+    assert result.markdown_path.read_text(encoding="utf-8") == "# Recovered by OCR"
+
+
+def test_convert_file_ocr_wraps_a_hosted_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from moodle_cli_anydoc.hosted import HostedError
+
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"%PDF-fake")
+    monkeypatch.setattr(convert_module, "resolve_firecrawl_key", lambda: "fc-test-key")
+
+    def raise_hosted_error(source: Path, api_key: str) -> str:
+        raise HostedError("rate limit exceeded")
+
+    monkeypatch.setattr(convert_module, "convert_hosted", raise_hosted_error)
+
+    with pytest.raises(ConversionError, match="rate limit exceeded"):
+        convert_file(source, ocr=True)
