@@ -84,6 +84,31 @@ def test_fetch_and_convert_downloads_and_converts(
     assert "1" in result.markdown
 
 
+def test_fetch_and_convert_passes_ocr_through_to_convert_file(
+    tmp_cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = f"{BASE_URL}/webservice/pluginfile.php/1/mod_resource/content/1/scan.csv"
+    body = b"a,b\n1,2\n"
+    client = FakeClient([_section(1, ("scan.csv", len(body), url))], _course())
+    monkeypatch.setattr(fetch_module, "open_client", lambda: client)
+
+    seen: dict[str, object] = {}
+
+    def fake_convert_file(path: Path, *, ocr: bool = False) -> object:
+        seen["ocr"] = ocr
+        from moodle_cli_anydoc.convert import Converted
+
+        return Converted(path, "ok", path.with_name(f"{path.name}.md"))
+
+    monkeypatch.setattr(fetch_module, "convert_file", fake_convert_file)
+
+    with respx.mock:
+        respx.get(url).mock(return_value=httpx.Response(200, content=body))
+        fetch_and_convert("IOS460", "scan.csv", ocr=True)
+
+    assert seen["ocr"] is True
+
+
 def test_fetch_and_convert_reuses_an_already_downloaded_file(
     tmp_cwd: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

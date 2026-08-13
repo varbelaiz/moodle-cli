@@ -1,14 +1,17 @@
 """Converting a single file already on disk to markdown.
 
-Nothing here touches the network, so there is no HTTP-200-but-actually-an-error case to
-guard against: anydoc raises on the file itself, with an exception type that names what
-went wrong (encrypted, malformed, unsupported format, ...).
+Local conversion never touches the network: anydoc raises on the file itself, with an
+exception type that names what went wrong (encrypted, malformed, unsupported format,
+...). The `ocr=True` path is the exception -- it sends the file to Firecrawl Parse, an
+opt-in only a caller who explicitly asks for it reaches.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+
+from moodle_cli_anydoc.hosted import HostedError, convert_hosted, resolve_firecrawl_key
 
 
 class ConversionError(Exception):
@@ -22,21 +25,38 @@ class Converted:
     markdown_path: Path
 
 
-def convert_file(source: Path) -> Converted:
+def convert_file(source: Path, *, ocr: bool = False) -> Converted:
     """Convert SOURCE to markdown and write it to `<name>.md` alongside it.
 
     Appends rather than replaces the suffix: this campus has courses where a teacher
     uploads the same material as both '.pdf' and '.docx' under one stem, and replacing
     the suffix would make the second conversion overwrite the first.
-    """
-    import anydoc
 
+    `ocr=True` sends the file to Firecrawl Parse (hosted, OCR-capable) instead of
+    converting it locally -- an explicit choice, not a fallback, since it means a
+    third-party service sees the file. Raises if `FIRECRAWL_KEY` is not configured
+    rather than silently converting locally instead.
+    """
     if not source.is_file():
         raise ConversionError(f"{source}: no such file")
-    try:
-        markdown = anydoc.to_markdown(str(source))
-    except (anydoc.ConvertError, OSError) as exc:
-        raise ConversionError(f"{source}: {exc}") from exc
+
+    if ocr:
+        api_key = resolve_firecrawl_key()
+        if not api_key:
+            raise ConversionError(
+                f"{source}: --ocr requires FIRECRAWL_KEY to be set (environment or .env)"
+            )
+        try:
+            markdown = convert_hosted(source, api_key)
+        except HostedError as exc:
+            raise ConversionError(f"{source}: {exc}") from exc
+    else:
+        import anydoc
+
+        try:
+            markdown = anydoc.to_markdown(str(source))
+        except (anydoc.ConvertError, OSError) as exc:
+            raise ConversionError(f"{source}: {exc}") from exc
 
     markdown_path = source.with_name(f"{source.name}.md")
     try:
