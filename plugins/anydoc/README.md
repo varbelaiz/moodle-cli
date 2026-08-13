@@ -24,10 +24,14 @@ Two capabilities, split by what each is for rather than just by input shape:
 Both accept `--ocr`, an opt-in that trades the local converter for Firecrawl's hosted
 `/parse` endpoint. The local converter is purely structural — it finds no text in a
 scanned page or a slide that's mostly a screenshot. Firecrawl Parse adds OCR models that
-recover that content. Requires `FIRECRAWL_KEY` in the environment or `.env`; without it,
-`--ocr` fails with a clear error rather than silently converting locally instead. It is
-never the default — sending course material to a third-party API should be a choice you
-make per file, not something that happens implicitly.
+recover that content. Forcing OCR only works for a PDF, since that is the only format
+Firecrawl's API exposes OCR control for — for a raw `.pptx`/`.docx`, `--ocr` still routes
+the file through Firecrawl Parse but cannot force OCR on it, so a slide deck uploaded as
+`.pptx` rather than an exported PDF may still convert thin. Requires `FIRECRAWL_KEY` in
+the environment or `.env`; without it, `--ocr` fails with a clear error rather than
+silently converting locally instead. It is never the default — sending course material
+to a third-party API should be a choice you make per file, not something that happens
+implicitly.
 
 ## `moodle anydoc convert`
 

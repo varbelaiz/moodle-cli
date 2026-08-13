@@ -35,7 +35,7 @@ class _FakeDocument:
 
 
 class _FakeFirecrawl:
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, timeout: float | None = None) -> None:
         self.api_key = api_key
 
     def parse(self, source: Path, options: Any = None) -> _FakeDocument:
@@ -56,7 +56,7 @@ def test_convert_hosted_wraps_a_failed_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class RaisingFirecrawl:
-        def __init__(self, api_key: str) -> None:
+        def __init__(self, api_key: str, timeout: float | None = None) -> None:
             pass
 
         def parse(self, source: Path, options: Any = None) -> _FakeDocument:
@@ -74,7 +74,7 @@ def test_convert_hosted_raises_on_empty_markdown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class EmptyFirecrawl:
-        def __init__(self, api_key: str) -> None:
+        def __init__(self, api_key: str, timeout: float | None = None) -> None:
             pass
 
         def parse(self, source: Path, options: Any = None) -> _FakeDocument:

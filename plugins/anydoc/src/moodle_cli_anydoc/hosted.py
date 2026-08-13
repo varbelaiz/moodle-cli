@@ -28,7 +28,12 @@ def resolve_firecrawl_key() -> str | None:
 
 
 def convert_hosted(source: Path, api_key: str) -> str:
-    """Convert SOURCE to markdown via Firecrawl Parse, with OCR forced on every page.
+    """Convert SOURCE to markdown via Firecrawl Parse, forcing OCR on every PDF page.
+
+    The SDK's `parsers` option only has a PDF-specific config (`PDFParser`) -- there is
+    no equivalent for other formats, so this forces OCR for a PDF but has no effect on
+    a non-PDF upload (.pptx, .docx, ...), which gets whatever handling Firecrawl applies
+    by default for that format.
 
     Firecrawl's SDK has no single exception type for a failed call: a rejected HTTP
     response raises the SDK's own FirecrawlError, an API response shaped
@@ -37,7 +42,9 @@ def convert_hosted(source: Path, api_key: str) -> str:
     Catching Exception broadly is deliberate, not a shortcut -- there is no narrower
     type that covers all three.
     """
-    client = Firecrawl(api_key=api_key)
+    # 300s matches Firecrawl's own documented maximum for a /parse call; unset, the SDK
+    # forwards timeout=None straight into requests, which waits forever on a stalled call.
+    client = Firecrawl(api_key=api_key, timeout=300)
     options = ParseOptions(parsers=[PDFParser(mode="ocr")])
     try:
         document = client.parse(source, options=options)
