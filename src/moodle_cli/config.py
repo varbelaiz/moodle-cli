@@ -18,11 +18,23 @@ KEYRING_SERVICE = "moodle-cli"
 _ENV_LOADED = False
 
 
-def _ensure_env_loaded() -> None:
-    """Load a .env from the cwd (or any parent) exactly once."""
+def ensure_env_loaded() -> None:
+    """Load a .env from the cwd (or any parent) exactly once.
+
+    Public so callers outside `load_config` -- e.g. a plugin reading its own env var --
+    can rely on the same .env without going through Moodle-specific config.
+
+    Skips the call to `load_dotenv` entirely when `_find_dotenv` finds nothing, rather
+    than calling `load_dotenv(None)`: passed `None`, python-dotenv falls back to its own
+    upward search from the caller's frame, bypassing `_find_dotenv` -- which a test that
+    monkeypatches `_find_dotenv` to isolate itself from a developer's real .env would not
+    expect.
+    """
     global _ENV_LOADED
     if not _ENV_LOADED:
-        load_dotenv(_find_dotenv())
+        dotenv_path = _find_dotenv()
+        if dotenv_path is not None:
+            load_dotenv(dotenv_path)
         _ENV_LOADED = True
 
 
@@ -54,7 +66,7 @@ class Config:
 
 
 def load_config(base_url: str | None = None) -> Config:
-    _ensure_env_loaded()
+    ensure_env_loaded()
     url = base_url or os.environ.get("MOODLE_URL")
     if not url:
         raise ValueError(
