@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from moodle_cli_panopto.errors import PanoptoError
+from moodle_cli_panopto.errors import PanoptoError, wrap_http_errors
 
 _LOGIN_PATH = "/login/index.php"
 _DASHBOARD_PATH = "/my/"
@@ -56,23 +56,32 @@ def login(base_url: str, username: str, password: str) -> MoodleWebSession:
     """
     client = httpx.Client(base_url=base_url.rstrip("/"), timeout=30, follow_redirects=True)
     try:
-        login_page = client.get(_LOGIN_PATH)
+        with wrap_http_errors(f"{base_url}: could not reach the login page"):
+            login_page = client.get(_LOGIN_PATH)
+            login_page.raise_for_status()
         logintoken = _scrape(_LOGINTOKEN_RES, login_page.text)
         if logintoken is None:
             raise PanoptoError(f"{base_url}: could not find a login token on the login page")
 
-        response = client.post(
-            _LOGIN_PATH,
-            data={"username": username, "password": password, "logintoken": logintoken},
-        )
-        # A rejected login re-renders the same form at the same URL rather than
-        # redirecting on to the dashboard.
-        if response.url.path.rstrip("/") == _LOGIN_PATH.rstrip("/"):
+        with wrap_http_errors(f"{base_url}: the login request failed"):
+            response = client.post(
+                _LOGIN_PATH,
+                data={"username": username, "password": password, "logintoken": logintoken},
+            )
+            response.raise_for_status()
+
+        # A rejected login re-renders the login form -- either at the same URL, or (an
+        # interstitial the campus's auth flow inserted) at a different one that still
+        # carries a fresh logintoken -- rather than redirecting on to the dashboard.
+        still_showing_the_form = _scrape(_LOGINTOKEN_RES, response.text) is not None
+        if response.url.path.rstrip("/") == _LOGIN_PATH.rstrip("/") or still_showing_the_form:
             raise PanoptoError(f"{base_url}: login was rejected for {username!r}")
 
         sesskey = _scrape(_SESSKEY_RES, response.text)
         if sesskey is None:
-            dashboard = client.get(_DASHBOARD_PATH)
+            with wrap_http_errors(f"{base_url}: could not reach the dashboard"):
+                dashboard = client.get(_DASHBOARD_PATH)
+                dashboard.raise_for_status()
             sesskey = _scrape(_SESSKEY_RES, dashboard.text)
         if sesskey is None:
             raise PanoptoError(f"{base_url}: logged in but could not find a sesskey")

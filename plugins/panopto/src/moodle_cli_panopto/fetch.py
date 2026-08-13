@@ -117,6 +117,24 @@ def _destination(resolved: Course, recording: Recording, output: Path | None) ->
     return root / filename
 
 
+def _write_markdown(destination: Path, markdown: str) -> None:
+    """Write MARKDOWN to DESTINATION atomically: stage to a ``.part`` file, then replace.
+
+    A process killed mid-write must never leave a truncated file at the real
+    destination -- ``download_transcripts``'s own skip-if-exists check treats any
+    non-empty file there as a completed download and would never retry a truncation.
+    Mirrors ``moodle_cli.downloads.download_file``'s ``.part``-then-``replace()`` pattern.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    part = destination.with_name(destination.name + ".part")
+    try:
+        part.write_text(markdown, encoding="utf-8")
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    part.replace(destination)
+
+
 def get_transcript_and_save(
     course: str, session: str, *, language: int | None = None, output: Path | None = None
 ) -> TranscriptResult:
@@ -129,8 +147,7 @@ def get_transcript_and_save(
         markdown = _transcript_markdown(ctx, resolved, recording, language)
 
     destination = _destination(resolved, recording, output)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(markdown, encoding="utf-8")
+    _write_markdown(destination, markdown)
     return TranscriptResult(recording=recording, markdown=markdown, markdown_path=destination)
 
 
@@ -216,8 +233,7 @@ def download_transcripts(
                         error=str(exc),
                     )
                     continue
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_text(markdown, encoding="utf-8")
+                _write_markdown(destination, markdown)
                 yield TranscriptOutcome(
                     recording=recording, destination=destination, status="downloaded"
                 )

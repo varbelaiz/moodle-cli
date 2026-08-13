@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from moodle_cli_panopto.errors import PanoptoError
+from moodle_cli_panopto.errors import PanoptoError, wrap_http_errors
 
 _DELIVERY_INFO_PATH = "/Panopto/Pages/Viewer/DeliveryInfo.aspx"
 _GENERATE_SRT_PATH = "/Panopto/Pages/Transcription/GenerateSRT.ashx"
@@ -21,10 +21,11 @@ _GENERATE_SRT_PATH = "/Panopto/Pages/Transcription/GenerateSRT.ashx"
 def get_delivery_info(panopto: httpx.Client, delivery_id: str) -> dict[str, Any]:
     """Fetch ``DeliveryInfo.aspx`` for one recording: metadata, including which caption
     languages are available."""
-    response = panopto.post(
-        _DELIVERY_INFO_PATH, data={"deliveryId": delivery_id, "responseType": "json"}
-    )
-    response.raise_for_status()
+    with wrap_http_errors(f"{delivery_id}: DeliveryInfo.aspx request failed"):
+        response = panopto.post(
+            _DELIVERY_INFO_PATH, data={"deliveryId": delivery_id, "responseType": "json"}
+        )
+        response.raise_for_status()
     try:
         body: Any = response.json()
     except ValueError as exc:
@@ -75,8 +76,9 @@ def fetch_srt(panopto: httpx.Client, delivery_id: str, language: int) -> str:
     An unavailable/wrong language code answers HTTP 200 with an empty body rather than
     an error -- treated here as a failure, not as "no transcript".
     """
-    response = panopto.get(_GENERATE_SRT_PATH, params={"id": delivery_id, "language": language})
-    response.raise_for_status()
+    with wrap_http_errors(f"{delivery_id}: GenerateSRT.ashx request failed"):
+        response = panopto.get(_GENERATE_SRT_PATH, params={"id": delivery_id, "language": language})
+        response.raise_for_status()
     text = response.text
     if not text.strip():
         raise PanoptoError(

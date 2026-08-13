@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from moodle_cli.downloads import matches_selection
-from moodle_cli_panopto.errors import PanoptoError
+from moodle_cli_panopto.errors import PanoptoError, wrap_http_errors
 from moodle_cli_panopto.moodle_login import MoodleWebSession
 
 _AJAX_PATH = "/lib/ajax/service.php"
@@ -83,18 +83,19 @@ def list_recordings(moodle: MoodleWebSession, course_id: int) -> list[Recording]
     AJAX endpoint. A live-in-progress session is listed the same as a completed one --
     its transcript, if requested, fails cleanly later rather than being filtered here.
     """
-    response = moodle.client.post(
-        _AJAX_PATH,
-        params={"sesskey": moodle.sesskey, "info": "block_panopto_get_content"},
-        json=[
-            {
-                "index": 0,
-                "methodname": "block_panopto_get_content",
-                "args": {"courseid": course_id},
-            }
-        ],
-    )
-    response.raise_for_status()
+    with wrap_http_errors(f"course {course_id}: block_panopto_get_content request failed"):
+        response = moodle.client.post(
+            _AJAX_PATH,
+            params={"sesskey": moodle.sesskey, "info": "block_panopto_get_content"},
+            json=[
+                {
+                    "index": 0,
+                    "methodname": "block_panopto_get_content",
+                    "args": {"courseid": course_id},
+                }
+            ],
+        )
+        response.raise_for_status()
     try:
         body: Any = response.json()
     except ValueError as exc:

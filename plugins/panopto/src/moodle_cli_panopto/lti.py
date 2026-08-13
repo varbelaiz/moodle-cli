@@ -15,7 +15,7 @@ from html.parser import HTMLParser
 import httpx
 
 from moodle_cli.client import MoodleClient
-from moodle_cli_panopto.errors import PanoptoError
+from moodle_cli_panopto.errors import PanoptoError, wrap_http_errors
 from moodle_cli_panopto.moodle_login import MoodleWebSession
 
 _LAUNCH_PATH = "/mod/lti/launch.php"
@@ -31,7 +31,9 @@ class _LtiFormParser(HTMLParser):
 
     A real parser rather than a regex: the whole OAuth1 signature depends on relaying
     these fields exactly, and attribute order (``type``/``name``/``value``) is not
-    something a regex can safely assume.
+    something a regex can safely assume. Tracking stops at the form's own closing tag,
+    so a hidden input anywhere later in the page (a second form, page chrome) is never
+    mistaken for one of the launch's own fields.
     """
 
     def __init__(self) -> None:
@@ -50,6 +52,10 @@ class _LtiFormParser(HTMLParser):
             if name is not None:
                 self.fields[name] = attributes.get("value") or ""
 
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form":
+            self._in_form = False
+
 
 def _parse_launch_form(markup: str) -> tuple[str, dict[str, str]] | None:
     parser = _LtiFormParser()
@@ -67,11 +73,19 @@ def _candidate_cmids(ws_client: MoodleClient, course_id: int) -> list[int]:
 def _try_launch(moodle: MoodleWebSession, cmid: int) -> tuple[httpx.Client, str] | None:
     """GET the launch form for CMID and, if its action targets a Panopto host, relay it.
 
-    Returns None -- without ever POSTing -- for any other external tool, so probing a
-    course's non-Panopto activities (a Zoom link, say) has no side effects on them.
+    Returns None for any other external tool -- including one whose launch page could
+    not even be fetched -- so probing a course's non-Panopto activities (a Zoom link, a
+    deleted module) never aborts the search for the real one. Once the host is
+    confirmed Panopto, a failure to complete the relay itself raises PanoptoError
+    instead: at that point this *is* the right activity, and falling through to other
+    candidates would only mask a genuine Panopto-side problem behind a misleading "no
+    Panopto activity found" error.
     """
-    response = moodle.client.get(_LAUNCH_PATH, params={"id": cmid})
-    response.raise_for_status()
+    try:
+        response = moodle.client.get(_LAUNCH_PATH, params={"id": cmid})
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
     parsed = _parse_launch_form(response.text)
     if parsed is None:
         return None
@@ -83,7 +97,9 @@ def _try_launch(moodle: MoodleWebSession, cmid: int) -> tuple[httpx.Client, str]
 
     panopto = httpx.Client(base_url=f"https://{host}", timeout=30, follow_redirects=True)
     try:
-        panopto.post(action, data=fields)
+        with wrap_http_errors(f"Panopto rejected the LTI launch relay for {host}"):
+            launch_response = panopto.post(action, data=fields)
+            launch_response.raise_for_status()
     except BaseException:
         panopto.close()
         raise
@@ -95,21 +111,22 @@ def establish_panopto_session(
 ) -> tuple[httpx.Client, str]:
     """Return ``(panopto_client, panopto_host)`` for COURSE_ID.
 
-    Tries the cmid cached from a previous call first; on a miss, probes every ``lti``
-    activity in the course until the Panopto one is found, then caches it. Raises
-    PanoptoError if none of the course's external tools is Panopto.
+    Tries the cmid cached from a previous call first, without listing the course's
+    contents at all -- on a hit, this costs one GET and one POST, nothing else. Only on
+    a miss (nothing cached yet, or the cached cmid no longer resolves to Panopto) does
+    it list the course's `lti` activities and probe them. Raises PanoptoError if none
+    of the course's external tools is Panopto.
     """
     key = (base_url, course_id)
-    candidates = _candidate_cmids(ws_client, course_id)
-
     cached = _cmid_cache.get(key)
-    ordered = (
-        [cached, *(c for c in candidates if c != cached)] if cached is not None else candidates
-    )
+    if cached is not None:
+        result = _try_launch(moodle, cached)
+        if result is not None:
+            return result
 
-    for cmid in ordered:
-        if cmid is None:
-            continue
+    for cmid in _candidate_cmids(ws_client, course_id):
+        if cmid == cached:
+            continue  # already tried above
         result = _try_launch(moodle, cmid)
         if result is not None:
             _cmid_cache[key] = cmid

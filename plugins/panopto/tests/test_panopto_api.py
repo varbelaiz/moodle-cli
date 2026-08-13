@@ -41,6 +41,16 @@ def test_get_delivery_info_raises_on_a_non_json_response() -> None:
             get_delivery_info(client, DELIVERY_ID)
 
 
+def test_get_delivery_info_wraps_an_http_error_as_panopto_error() -> None:
+    """A non-2xx must never escape as a raw httpx.HTTPStatusError."""
+    with respx.mock:
+        respx.post(f"{PANOPTO_URL}/Panopto/Pages/Viewer/DeliveryInfo.aspx").mock(
+            return_value=httpx.Response(500)
+        )
+        with _client() as client, pytest.raises(PanoptoError):
+            get_delivery_info(client, DELIVERY_ID)
+
+
 def test_get_delivery_info_raises_when_the_shape_is_unexpected() -> None:
     with respx.mock:
         respx.post(f"{PANOPTO_URL}/Panopto/Pages/Viewer/DeliveryInfo.aspx").mock(
@@ -107,3 +117,12 @@ def test_fetch_srt_raises_on_an_empty_body() -> None:
         )
         with _client() as client, pytest.raises(PanoptoError, match="empty"):
             fetch_srt(client, DELIVERY_ID, 99)
+
+
+def test_fetch_srt_wraps_an_http_error_as_panopto_error() -> None:
+    with respx.mock:
+        respx.get(f"{PANOPTO_URL}/Panopto/Pages/Transcription/GenerateSRT.ashx").mock(
+            return_value=httpx.Response(403)
+        )
+        with _client() as client, pytest.raises(PanoptoError):
+            fetch_srt(client, DELIVERY_ID, 3)

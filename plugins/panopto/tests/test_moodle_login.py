@@ -78,6 +78,33 @@ def test_login_raises_when_no_logintoken_is_found() -> None:
             login(BASE_URL, "ana", "hunter2")
 
 
+def test_login_wraps_an_http_error_as_panopto_error() -> None:
+    """A 5xx on the login page itself must never escape as a raw httpx error."""
+    with respx.mock:
+        respx.get(f"{BASE_URL}/login/index.php").mock(return_value=httpx.Response(500))
+
+        with pytest.raises(PanoptoError):
+            login(BASE_URL, "ana", "hunter2")
+
+
+def test_login_raises_when_an_interstitial_still_shows_a_login_form() -> None:
+    """A rejected login can land somewhere other than /login/index.php and still be
+    a login form -- e.g. a campus-specific auth controller -- and must be caught too."""
+    with respx.mock:
+        respx.get(f"{BASE_URL}/login/index.php").mock(
+            return_value=httpx.Response(200, text=login_page_html("tok-1"))
+        )
+        respx.post(f"{BASE_URL}/login/index.php").mock(
+            return_value=httpx.Response(303, headers={"Location": "/login/interstitial.php"})
+        )
+        respx.get(f"{BASE_URL}/login/interstitial.php").mock(
+            return_value=httpx.Response(200, text=login_page_html("tok-2"))
+        )
+
+        with pytest.raises(PanoptoError, match="rejected"):
+            login(BASE_URL, "ana", "hunter2")
+
+
 def test_login_raises_when_no_sesskey_is_found_anywhere() -> None:
     with respx.mock:
         respx.get(f"{BASE_URL}/login/index.php").mock(

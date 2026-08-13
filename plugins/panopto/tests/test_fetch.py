@@ -296,3 +296,71 @@ def test_download_transcripts_one_failure_does_not_abort_the_batch(
 
     assert [o.status for o in outcomes] == ["downloaded", "error"]
     assert outcomes[1].error is not None
+
+
+def test_download_transcripts_an_http_failure_does_not_abort_the_batch(
+    monkeypatch: pytest.MonkeyPatch, credentials: None, tmp_cwd: Path
+) -> None:
+    """Not just the empty-SRT case: a genuine transport/status failure on one recording
+    (a timeout, a 500) must be wrapped into PanoptoError too, so it is caught by the
+    same per-recording except clause instead of aborting every recording after it."""
+    ws = FakeWsClient(_sections_with_panopto_lti(), resolved := _course())
+    monkeypatch.setattr(fetch_module, "open_client", lambda: ws)
+    _fake_login(monkeypatch)
+    bad = _fake_recording(DELIVERY_A, "Clase con falla de red")
+    good = _fake_recording(DELIVERY_B, "Clase buena")
+
+    with respx.mock:
+        respx.get(LAUNCH_URL, params={"id": "20"}).mock(
+            return_value=httpx.Response(
+                200,
+                text=(
+                    f'<form name="f" action="{PANOPTO_ACTION}" method="post">'
+                    '<input type="hidden" name="oauth_signature" value="sig"/></form>'
+                    "<script>document.f.submit();</script>"
+                ),
+            )
+        )
+        respx.post(PANOPTO_ACTION).mock(return_value=httpx.Response(200))
+        # The first recording's DeliveryInfo call 500s; the second succeeds.
+        respx.post(DELIVERY_INFO_URL).mock(
+            side_effect=[
+                httpx.Response(500),
+                httpx.Response(200, json={"Delivery": {"AvailableLanguages": [3]}}),
+            ]
+        )
+        respx.get(GENERATE_SRT_URL).mock(
+            return_value=httpx.Response(200, text="1\n00:00:00,000 --> 00:00:01,000\nHola\n")
+        )
+        outcomes = list(download_transcripts(resolved, [bad, good]))
+
+    assert [o.status for o in outcomes] == ["error", "downloaded"]
+    assert outcomes[0].error is not None
+
+
+def test_get_transcript_and_save_does_not_leave_a_truncated_file_on_a_write_failure(
+    monkeypatch: pytest.MonkeyPatch, credentials: None, tmp_cwd: Path
+) -> None:
+    """A crash mid-write must not leave a file at the real destination -- that would be
+    silently treated as a completed download and never retried."""
+    ws = FakeWsClient(_sections_with_panopto_lti(), _course())
+    monkeypatch.setattr(fetch_module, "open_client", lambda: ws)
+    _fake_login(monkeypatch)
+    fragment = recordings_fragment(recording_link(DELIVERY_A, "Clase 1"))
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    with respx.mock:
+        respx.post(AJAX_URL).mock(
+            return_value=httpx.Response(200, json=[{"error": False, "data": fragment}])
+        )
+        _mock_transcript_chain()
+        monkeypatch.setattr(Path, "write_text", refuse)
+
+        with pytest.raises(OSError):
+            get_transcript_and_save("IOS460", "Clase 1")
+
+    destination = tmp_cwd / "IOS460" / "Panopto" / "Clase 1.md"
+    assert not destination.exists()
+    assert not destination.with_name(destination.name + ".part").exists()

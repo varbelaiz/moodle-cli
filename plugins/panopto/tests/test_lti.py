@@ -29,8 +29,10 @@ PANOPTO_ACTION = f"{PANOPTO_URL}/Panopto/lti/lti.aspx"
 class FakeWsClient:
     def __init__(self, sections: list[Section]) -> None:
         self._sections = sections
+        self.get_course_contents_calls = 0
 
     def get_course_contents(self, course_id: int) -> list[Section]:
+        self.get_course_contents_calls += 1
         return self._sections
 
 
@@ -107,6 +109,66 @@ def test_establish_panopto_session_caches_the_working_cmid() -> None:
     # The cached cmid (20) is tried first on the second call, so the non-Panopto
     # module (10) is never probed a second time.
     assert zoom_route.call_count == 1
+
+
+def test_establish_panopto_session_skips_the_course_contents_call_on_a_cache_hit() -> None:
+    sections = _sections(_lti_module(20, "Clases Grabadas"))
+    fake = FakeWsClient(sections)
+    ws = cast(MoodleClient, fake)
+
+    with respx.mock:
+        respx.get(LAUNCH_URL, params={"id": "20"}).mock(
+            return_value=httpx.Response(200, text=lti_launch_html(PANOPTO_ACTION, {}))
+        )
+        respx.post(PANOPTO_ACTION).mock(return_value=httpx.Response(200))
+
+        first = _session()
+        client, _host = lti.establish_panopto_session(first, ws, BASE_URL, 1)
+        client.close()
+        first.client.close()
+        assert fake.get_course_contents_calls == 1
+
+        second = _session()
+        client, _host = lti.establish_panopto_session(second, ws, BASE_URL, 1)
+        client.close()
+        second.client.close()
+
+    # A cache hit must not re-list the course's contents at all.
+    assert fake.get_course_contents_calls == 1
+
+
+def test_establish_panopto_session_raises_when_the_panopto_relay_post_fails() -> None:
+    """A non-2xx from Panopto's own launch endpoint must not be treated as success."""
+    sections = _sections(_lti_module(20, "Clases Grabadas"))
+    ws = cast(MoodleClient, FakeWsClient(sections))
+    moodle = _session()
+
+    with respx.mock:
+        respx.get(LAUNCH_URL, params={"id": "20"}).mock(
+            return_value=httpx.Response(200, text=lti_launch_html(PANOPTO_ACTION, {}))
+        )
+        respx.post(PANOPTO_ACTION).mock(return_value=httpx.Response(500))
+
+        with pytest.raises(PanoptoError):
+            lti.establish_panopto_session(moodle, ws, BASE_URL, 1)
+
+    moodle.client.close()
+
+
+def test_parse_launch_form_ignores_hidden_inputs_after_the_form_closes() -> None:
+    """A stray hidden input elsewhere on the page must not overwrite a real launch field."""
+    markup = (
+        '<form action="https://panopto.example/lti.aspx" method="post">'
+        '<input type="hidden" name="oauth_signature" value="real-signature"/>'
+        "</form>"
+        '<input type="hidden" name="oauth_signature" value="clobbered"/>'
+    )
+
+    parsed = lti._parse_launch_form(markup)
+
+    assert parsed is not None
+    _action, fields = parsed
+    assert fields["oauth_signature"] == "real-signature"
 
 
 def test_establish_panopto_session_raises_when_no_tool_is_panopto() -> None:

@@ -62,6 +62,16 @@ def test_list_recordings_raises_when_the_block_reports_an_error() -> None:
     session.client.close()
 
 
+def test_list_recordings_wraps_an_http_error_as_panopto_error() -> None:
+    """A session-expired 403 (or any non-2xx) must never escape as a raw httpx error."""
+    session = _session()
+    with respx.mock:
+        respx.post(AJAX_URL).mock(return_value=httpx.Response(403))
+        with pytest.raises(PanoptoError):
+            list_recordings(session, 29272)
+    session.client.close()
+
+
 def test_list_recordings_returns_empty_for_a_course_with_none() -> None:
     session = _session()
     with respx.mock:
