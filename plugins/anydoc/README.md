@@ -21,6 +21,14 @@ Two capabilities, split by what each is for rather than just by input shape:
   expected size is reused rather than re-fetched. Returns the markdown content inline, so
   reading one course document takes one call instead of a download-then-convert dance.
 
+Both accept `--ocr`, an opt-in that trades the local converter for Firecrawl's hosted
+`/parse` endpoint. The local converter is purely structural — it finds no text in a
+scanned page or a slide that's mostly a screenshot. Firecrawl Parse adds OCR models that
+recover that content. Requires `FIRECRAWL_KEY` in the environment or `.env`; without it,
+`--ocr` fails with a clear error rather than silently converting locally instead. It is
+never the default — sending course material to a third-party API should be a choice you
+make per file, not something that happens implicitly.
+
 ## `moodle anydoc convert`
 
 ```
@@ -36,6 +44,12 @@ One file failing (corrupt, encrypted, or a format anydoc does not recognize) doe
 stop the rest of the batch; it is reported to stderr and the command exits non-zero once
 the batch finishes.
 
+```
+moodle anydoc convert --ocr PATH...
+```
+
+Converts via Firecrawl Parse instead of locally. Requires `FIRECRAWL_KEY`.
+
 Example output:
 
 ```
@@ -46,7 +60,8 @@ FAIL  IOS460/scan.pdf: encrypted or password-protected
 ## `anydoc_convert_to_markdown`
 
 MCP tool. Same conversion, for an agent building up a batch of files already on disk —
-for example, exporting a course into an Obsidian vault.
+for example, exporting a course into an Obsidian vault. `ocr: true` converts via
+Firecrawl Parse instead of locally; requires `FIRECRAWL_KEY`.
 
 ```json
 {"paths": ["IOS460/Programa.pdf", "IOS460/Semana 1/slides.pptx"]}
@@ -64,17 +79,20 @@ Returns a path-only manifest, one entry per input, in order:
 ## `moodle anydoc fetch`
 
 ```
-moodle anydoc fetch COURSE FILENAME [--section N]
+moodle anydoc fetch COURSE FILENAME [--section N] [--ocr]
 ```
 
 Fetches one file by course and exact filename (as shown by `moodle course contents`),
 converts it, and writes `<name>.md` alongside it. `--section` disambiguates the rare case
 where a duplicated activity produces two files under the same name with different sizes.
+`--ocr` converts via Firecrawl Parse instead of locally; requires `FIRECRAWL_KEY`.
 
 ## `anydoc_get_markdown`
 
 MCP tool. Same fetch, for an agent asking about one course document — a slide, a handout
-— without a prior download step.
+— without a prior download step. `ocr: true` converts via Firecrawl Parse instead of
+locally — useful once a local conversion of the same file came back thin (a scanned
+page, an image-heavy slide); requires `FIRECRAWL_KEY`.
 
 ```json
 {"course": "IOS460", "filename": "Programa.pdf"}
