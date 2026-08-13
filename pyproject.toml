@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 anydoc = ["moodle-cli-anydoc"]
+panopto = ["moodle-cli-panopto"]
 
 [project.scripts]
 moodle = "moodle_cli.cli:main"
@@ -41,6 +42,7 @@ members = ["plugins/*"]
 
 [tool.uv.sources]
 moodle-cli-anydoc = { workspace = true }
+moodle-cli-panopto = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
