@@ -20,7 +20,7 @@ from moodle_cli_anydoc.fetch import fetch_and_convert
 INLINE_LIMIT = 20_000
 
 
-def convert_to_markdown(paths: list[str], ocr: bool = False) -> list[dict[str, Any]]:
+def convert_to_markdown(paths: list[str], *, ocr: bool = False) -> list[dict[str, Any]]:
     """Convert one or more files already on disk to markdown.
 
     Writes `<path>.md` alongside each file and returns a path-only manifest -- no
@@ -50,7 +50,7 @@ def convert_to_markdown(paths: list[str], ocr: bool = False) -> list[dict[str, A
 
 
 def get_markdown(
-    course: str, filename: str, section: int | None = None, ocr: bool = False
+    course: str, filename: str, section: int | None = None, *, ocr: bool = False
 ) -> dict[str, Any]:
     """Fetch one course file and convert it to markdown, in a single call.
 
