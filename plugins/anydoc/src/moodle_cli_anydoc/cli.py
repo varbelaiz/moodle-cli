@@ -30,6 +30,15 @@ app = typer.Typer(help="Convert course files to markdown.")
 P = ParamSpec("P")
 R = TypeVar("R")
 
+OcrOpt = Annotated[
+    bool,
+    typer.Option(
+        "--ocr",
+        help="Convert via Firecrawl Parse (hosted, OCR) instead of locally. "
+        "Requires FIRECRAWL_KEY; sends the document to a third-party API.",
+    ),
+]
+
 
 def _handle_errors(func: Callable[P, R]) -> Callable[P, R]:
     @functools.wraps(func)
@@ -49,14 +58,7 @@ def convert_command(
         list[Path],
         typer.Argument(help="Files to convert, as put on disk by `course download`."),
     ],
-    ocr: Annotated[
-        bool,
-        typer.Option(
-            "--ocr",
-            help="Convert via Firecrawl Parse (hosted, OCR) instead of locally. "
-            "Requires FIRECRAWL_KEY; sends each file to a third-party API.",
-        ),
-    ] = False,
+    ocr: OcrOpt = False,
 ) -> None:
     """Convert one or more files already on disk to markdown, writing `<name>.md` alongside each."""
     failed = 0
@@ -84,14 +86,7 @@ def fetch_command(
         int | None,
         typer.Option("--section", help="Narrow to one section, if the name matches more than one."),
     ] = None,
-    ocr: Annotated[
-        bool,
-        typer.Option(
-            "--ocr",
-            help="Convert via Firecrawl Parse (hosted, OCR) instead of locally. "
-            "Requires FIRECRAWL_KEY; sends the file to a third-party API.",
-        ),
-    ] = False,
+    ocr: OcrOpt = False,
 ) -> None:
     """Fetch one course file and convert it to markdown, writing `<name>.md` alongside it."""
     converted = fetch_and_convert(course, filename, section=section, ocr=ocr)
