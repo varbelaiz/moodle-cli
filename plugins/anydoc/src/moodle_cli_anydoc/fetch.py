@@ -17,12 +17,16 @@ from moodle_cli.session import open_client
 from moodle_cli_anydoc.convert import Converted, convert_file
 
 
-def fetch_and_convert(course: str, filename: str, *, section: int | None = None) -> Converted:
+def fetch_and_convert(
+    course: str, filename: str, *, section: int | None = None, ocr: bool = False
+) -> Converted:
     """Resolve COURSE, fetch FILENAME, and convert what was fetched to markdown.
 
     Raises ValueError if no file in the course matches FILENAME, or if more than one
     does -- this campus has courses where a duplicated activity produces two files under
     the same name with different sizes, and `section` is how a caller tells them apart.
+
+    `ocr` is passed straight through to `convert_file` -- see there for what it does.
     """
     with open_client() as client:
         token = client.token
@@ -63,4 +67,4 @@ def fetch_and_convert(course: str, filename: str, *, section: int | None = None)
     with httpx.Client(timeout=300, follow_redirects=True) as http:
         download_file(http, item.file, token, item.destination)
 
-    return convert_file(item.destination)
+    return convert_file(item.destination, ocr=ocr)

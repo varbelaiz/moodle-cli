@@ -53,7 +53,7 @@ def test_get_markdown_returns_content_and_path(
     monkeypatch.setattr(
         tools_module,
         "fetch_and_convert",
-        lambda course, filename, section=None: Converted(source, "| 1 |", markdown_path),
+        lambda course, filename, section=None, ocr=False: Converted(source, "| 1 |", markdown_path),
     )
 
     payload = get_markdown("IOS460", "grades.csv")
@@ -75,7 +75,9 @@ def test_get_markdown_truncates_long_output(
     monkeypatch.setattr(
         tools_module,
         "fetch_and_convert",
-        lambda course, filename, section=None: Converted(source, long_markdown, markdown_path),
+        lambda course, filename, section=None, ocr=False: Converted(
+            source, long_markdown, markdown_path
+        ),
     )
 
     payload = get_markdown("IOS460", "big.pdf")
@@ -91,7 +93,9 @@ def test_get_markdown_passes_section_through(
 ) -> None:
     seen: dict[str, object] = {}
 
-    def fake_fetch_and_convert(course: str, filename: str, section: int | None = None) -> Converted:
+    def fake_fetch_and_convert(
+        course: str, filename: str, section: int | None = None, ocr: bool = False
+    ) -> Converted:
         seen["section"] = section
         return Converted(tmp_path / "a.csv", "ok", tmp_path / "a.csv.md")
 
@@ -100,3 +104,35 @@ def test_get_markdown_passes_section_through(
     get_markdown("IOS460", "notes.csv", section=2)
 
     assert seen["section"] == 2
+
+
+def test_get_markdown_passes_ocr_through(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_fetch_and_convert(
+        course: str, filename: str, section: int | None = None, ocr: bool = False
+    ) -> Converted:
+        seen["ocr"] = ocr
+        return Converted(tmp_path / "a.pdf", "ok", tmp_path / "a.pdf.md")
+
+    monkeypatch.setattr(tools_module, "fetch_and_convert", fake_fetch_and_convert)
+
+    get_markdown("IOS460", "scan.pdf", ocr=True)
+
+    assert seen["ocr"] is True
+
+
+def test_convert_to_markdown_passes_ocr_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_convert_file(path: Path, *, ocr: bool = False) -> Converted:
+        seen["ocr"] = ocr
+        return Converted(path, "ok", path.with_name(f"{path.name}.md"))
+
+    monkeypatch.setattr(tools_module, "convert_file", fake_convert_file)
+
+    convert_to_markdown([str(tmp_path / "scan.pdf")], ocr=True)
+
+    assert seen["ocr"] is True

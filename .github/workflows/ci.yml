@@ -63,3 +63,18 @@ jobs:
       - name: pytest
         working-directory: plugins/anydoc
         run: uv run pytest
+
+  plugin-panopto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --extra panopto
+      - name: mypy
+        working-directory: plugins/panopto
+        run: uv run mypy
+      - name: pytest
+        working-directory: plugins/panopto
+        run: uv run pytest
