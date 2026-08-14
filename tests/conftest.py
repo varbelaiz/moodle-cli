@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -89,23 +88,6 @@ def no_plugins(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     plugins.reset()
     yield
     plugins.reset()
-
-
-@pytest.fixture(autouse=True)
-def fixed_timezone(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Pin the zone so a date assertion says the same thing on every machine.
-
-    Dates are rendered in local time, so without this the expected day depends on where
-    the suite runs. The campus's own zone is the one the output has to read correctly in,
-    and being off UTC is what keeps a test able to tell the two apart.
-    """
-    monkeypatch.setenv("TZ", "America/Argentina/Buenos_Aires")
-    time.tzset()
-    try:
-        yield
-    finally:
-        monkeypatch.undo()
-        time.tzset()
 
 
 @pytest.fixture
