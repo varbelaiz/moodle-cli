@@ -33,8 +33,13 @@ prefix them with `uv run`, as in `uv run moodle courses list`.
 To install it on your PATH instead of working from a checkout:
 
 ```bash
-uv tool install moodle-cli
+uv tool install "moodle-cli @ git+https://github.com/varbelaiz/moodle-cli@vX.Y.Z"
 ```
+
+Releases live on GitHub — replace `vX.Y.Z` with the newest tag from
+[Releases](https://github.com/varbelaiz/moodle-cli/releases); see
+[Updating](docs/updating.md) for details, and for `moodle update`, which moves an install
+already on your PATH to the latest one.
 
 `uv sync` in a checkout installs the core alone, on purpose: the default test run has to
 prove that moodle-cli works with no plugins present.
@@ -101,6 +106,13 @@ notes. An installed plugin adds a group of its own; `moodle plugins list` shows 
 | `moodle auth login` | Mint a token and store it in the keyring. |
 | `moodle auth status` | Show who the stored token belongs to, and what it can do. |
 | `moodle auth logout` | Delete the stored token. |
+
+### [Updating](docs/updating.md)
+
+| CLI | Description |
+| --- | --- |
+| `moodle version` | Show the installed version, optionally checking for a newer release. |
+| `moodle update` | Upgrade this installation to the latest GitHub release. |
 
 ### [Plugins](docs/plugins.md)
 
@@ -230,3 +242,17 @@ the environment and is what catches a campus changing its API underneath the fix
 
 The suite runs with plugin discovery disabled, so whatever you have installed cannot change
 what it proves. Tests that need a plugin construct a fake one.
+
+### Releasing
+
+The version comes from the git tag, not from a file — there is nothing to bump. From a
+commit already green on `main`:
+
+```bash
+git tag vX.Y.Z
+git push --tags
+```
+
+The tag push triggers a GitHub Release with generated notes. Only tag a commit that has
+already passed CI on `main`: the release workflow builds and publishes, it does not
+re-run lint or tests.
