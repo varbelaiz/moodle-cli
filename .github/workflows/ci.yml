@@ -28,6 +28,21 @@ jobs:
       - name: mypy
         run: uv run mypy
 
+  # Catches a broken hatch-vcs/packaging config on every PR, not only when a tag is pushed
+  # and release.yml runs `uv build` for real. Its own job, not a `lint` step, so `lint`'s
+  # checkout can stay shallow: hatch-vcs needs full history and tags to compute a version,
+  # the same reason release.yml's checkout uses fetch-depth: 0.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+      - run: uv build
+
   # The floor and ceiling of the supported range, plus what is in between:
   # pyproject declares requires-python >=3.11.
   test:

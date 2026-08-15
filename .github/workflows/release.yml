@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Trusts that a tag is only ever pushed from a commit already green on `main` — this does
+# not re-run lint/test, only build and publish.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # hatch-vcs needs the full history and tags to compute the version from `git
+          # describe`; the default shallow checkout would see no tags at all.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+      - run: uv build
+      # The built sdist/wheel are attached for inspection only: `moodle update` installs
+      # straight from the tagged git ref, it never downloads a release asset.
+      - name: gh release create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --generate-notes dist/*
