@@ -360,7 +360,7 @@ def test_plugins_install_in_a_plain_venv_targets_that_interpreter(
         "pip",
         "install",
         "--python",
-        "/env/bin/python",
+        str(Path("/env/bin/python")),
         f"moodle-cli[anydoc] @ git+https://github.com/varbelaiz/moodle-cli@v{cli.__version__}",
     ]
 

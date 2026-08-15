@@ -82,7 +82,8 @@ def test_dedupe_extension(raw: str, expected: str) -> None:
 
 def test_plan_downloads_mirrors_sections_and_folders(sections: list[Section]) -> None:
     planned = plan_downloads(sections, Path("root"))
-    paths = sorted(str(p.destination) for p in planned)
+    # The plan is portable; only the display separator differs between Windows and POSIX.
+    paths = sorted(p.destination.as_posix() for p in planned)
 
     # "Programa  - Taller.pdf.pdf" loses its doubled extension and its doubled space.
     assert paths == [
