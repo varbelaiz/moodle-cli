@@ -174,6 +174,7 @@ def reset() -> None:
     """Forget the discovery and catalog caches. For tests, and only for tests."""
     _discover.cache_clear()
     catalog.cache_clear()
+    extra_distributions.cache_clear()
 
 
 # -- mounting ----------------------------------------------------------------------
@@ -263,6 +264,7 @@ class CatalogEntry:
     problem: str | None  # installed but rejected, and why
 
 
+@cache
 def extra_distributions() -> dict[str, str]:
     """Map each plugin extra to the distribution it installs, from the core's metadata.
 
