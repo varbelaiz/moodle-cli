@@ -39,9 +39,10 @@ def latest_release() -> str:
 def is_newer(tag: str, current: str) -> bool:
     """Whether release `tag` (e.g. "v0.2.0") is newer than the installed `current` version."""
     try:
-        return Version(tag.removeprefix("v")) > Version(current)
+        parsed_tag = Version(tag.removeprefix("v"))
     except InvalidVersion as exc:
         raise MoodleError(f"{tag!r} is not a valid release tag: {exc}") from exc
+    return parsed_tag > _parse_current(current)
 
 
 def is_exact_release(version: str) -> bool:
@@ -50,4 +51,12 @@ def is_exact_release(version: str) -> bool:
     A hatch-vcs version off a tag carries a `+g<hash>` local segment. Only when this is
     True does `v{version}` name a real git tag.
     """
-    return Version(version).local is None
+    return _parse_current(version).local is None
+
+
+def _parse_current(version: str) -> Version:
+    """The installed `version` parsed, blaming the local install rather than a release tag."""
+    try:
+        return Version(version)
+    except InvalidVersion as exc:
+        raise MoodleError(f"{version!r} is not a valid installed version: {exc}") from exc
