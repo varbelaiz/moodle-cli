@@ -33,13 +33,15 @@ prefix them with `uv run`, as in `uv run moodle courses list`.
 To install it on your PATH instead of working from a checkout:
 
 ```bash
-uv tool install "moodle-cli @ git+https://github.com/varbelaiz/moodle-cli@vX.Y.Z"
+uv tool install "moodle-cli @ git+https://github.com/varbelaiz/moodle-cli"
 ```
 
-Releases live on GitHub — replace `vX.Y.Z` with the newest tag from
-[Releases](https://github.com/varbelaiz/moodle-cli/releases); see
+That tracks the tip of the repo — "moodle-cli" is taken on PyPI by an unrelated project,
+so there is no index to resolve a bare `moodle-cli` against. To pin a specific release
+instead, append `@vX.Y.Z` for a tag from
+[Releases](https://github.com/varbelaiz/moodle-cli/releases). See
 [Updating](docs/updating.md) for details, and for `moodle update`, which moves an install
-already on your PATH to the latest one.
+already on your PATH to the latest release.
 
 `uv sync` in a checkout installs the core alone, on purpose: the default test run has to
 prove that moodle-cli works with no plugins present.
