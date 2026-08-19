@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, ParamSpec, TypeVar
@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
+from moodle_cli import __version__ as __version__
 from moodle_cli.auth import TokenStore, mint_token
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
@@ -41,7 +42,6 @@ from moodle_cli.models import (
     epoch_to_datetime,
 )
 from moodle_cli.plugins import (
-    CORE_DISTRIBUTION,
     CatalogEntry,
     catalog,
     extra_distributions,
@@ -54,11 +54,14 @@ from moodle_cli.session import open_client
 from moodle_cli.toolenv import (
     Environment,
     detect,
+    git_spec,
     injected_packages,
     install_command,
     pip_command,
+    resolved_ref,
     run,
 )
+from moodle_cli.update import is_newer, latest_release
 
 console = Console()
 err_console = Console(stderr=True)
@@ -1023,6 +1026,48 @@ def _known(name: str) -> CatalogEntry:
     raise MoodleError(f"No such plugin: {name!r}. Known plugins: {known}.")
 
 
+def _foreign_injected(injected: Sequence[str]) -> list[str]:
+    """The hand-injected `--with` packages that are not one of this release's own plugins.
+
+    Only an official plugin can come back as an extra, so only an official one may be
+    dropped from the injected set. A third-party plugin is in the catalog too, and
+    filtering against the whole catalog would drop it from `--with` without `wanted` ever
+    restating it, uninstalling it in silence.
+    """
+    installable = set(extra_distributions().values())
+    return [p for p in injected if requirement_name(p) not in installable]
+
+
+def _require_uv(env: Environment, extras: Iterable[str], ref: str) -> str:
+    """`env.uv`, or the "uv is not on PATH" error naming the command to run by hand."""
+    if env.uv is None:
+        spec = git_spec(extras, ref)
+        raise MoodleError(
+            f"uv is not on PATH, so this cannot change the installation itself. "
+            f"Install {spec!r} with the packaging tool you used for moodle-cli."
+        )
+    return env.uv
+
+
+def _uv_tool_reinstall(uv: str, extras: Iterable[str], ref: str) -> list[str]:
+    """The `uv tool install --reinstall` argv, restating hand-injected `--with` packages.
+
+    Shared by `plugins install`/`uninstall` and `update`: both rebuild the whole tool
+    environment from an (extras, ref) pair, which is the only thing that differs between
+    them.
+    """
+    injected = injected_packages(uv)
+    if injected is None:
+        spec = git_spec(extras, ref)
+        raise MoodleError(
+            "Could not read the packages injected into this tool environment, and "
+            "reinstalling without them would remove them. Run "
+            f'`uv tool install --reinstall "{spec}"` yourself, '
+            "restating every --with package."
+        )
+    return install_command(uv, extras, _foreign_injected(injected), ref)
+
+
 def _plan(name: str, *, keep: bool) -> tuple[Environment, list[str]]:
     """The environment and the command that leaves it with `name` installed or removed."""
     env = detect()
@@ -1031,35 +1076,16 @@ def _plan(name: str, *, keep: bool) -> tuple[Environment, list[str]]:
             "This moodle is an editable install from a checkout. Change its extras there "
             f"instead, with `uv sync --extra {name}`."
         )
-    if env.uv is None:
-        spec = f"{CORE_DISTRIBUTION}[{name}]"
-        raise MoodleError(
-            f"uv is not on PATH, so this cannot change the installation itself. "
-            f"Install {spec!r} with the packaging tool you used for moodle-cli."
-        )
-
+    # Pins the core to its current commit or tag: changing extras must never move the core.
+    ref = resolved_ref(__version__)
     wanted = installed_extras() | {name} if keep else installed_extras() - {name}
+    uv = _require_uv(env, wanted, ref)
 
     if env.kind == "uv-tool":
-        injected = injected_packages(env.uv)
-        if injected is None:
-            spec = f"{CORE_DISTRIBUTION}[{','.join(sorted(wanted))}]"
-            raise MoodleError(
-                "Could not read the packages injected into this tool environment, and "
-                "reinstalling without them would remove them. Run "
-                f'`uv tool install --reinstall "{spec}"` yourself, '
-                "restating every --with package."
-            )
-        # Only an official plugin can come back as an extra, so only an official one may
-        # be dropped from the injected set. A third-party plugin is in the catalog too,
-        # and filtering against the whole catalog would drop it from `--with` without
-        # `wanted` ever restating it, uninstalling it in silence.
-        installable = set(extra_distributions().values())
-        foreign = [p for p in injected if requirement_name(p) not in installable]
-        return env, install_command(env.uv, wanted, foreign)
+        return env, _uv_tool_reinstall(uv, wanted, ref)
 
-    spec = f"{CORE_DISTRIBUTION}[{name}]" if keep else _known(name).distribution
-    return env, pip_command(env.uv, env.python, spec, uninstall=not keep)
+    spec = git_spec({name}, ref) if keep else _known(name).distribution
+    return env, pip_command(uv, env.python, spec, uninstall=not keep)
 
 
 @plugins_app.command("install")
@@ -1131,10 +1157,89 @@ def plugins_uninstall(
         return
     console.print(f"[green]Removed[/green] {name}.")
     if env.kind == "uv-managed":
+        spec = git_spec({name}, f"v{__version__}")
         console.print(
-            f"  the `{name}` extra still declares it, so installing "
-            f"`{CORE_DISTRIBUTION}[{name}]` again brings it back"
+            f"  the `{name}` extra still declares it, so installing `{spec}` again brings it back"
         )
+
+
+# -- self-update -------------------------------------------------------------------
+
+
+@app.command("version")
+@handle_errors
+def version_cmd(
+    check: Annotated[
+        bool, typer.Option("--check", help="Also check GitHub for a newer release.")
+    ] = False,
+    as_json: JsonOpt = False,
+) -> None:
+    """Show the installed version of moodle-cli.
+
+    Never reaches the network unless `--check` is passed.
+    """
+    latest: str | None = None
+    update_available: bool | None = None
+    if check:
+        latest = latest_release()
+        update_available = is_newer(latest, __version__)
+
+    if as_json:
+        payload: dict[str, Any] = {"version": __version__}
+        if check:
+            payload["latest"] = latest
+            payload["update_available"] = update_available
+        _emit_json(payload)
+        return
+
+    console.print(f"moodle-cli {__version__}")
+    if not check:
+        return
+    if update_available:
+        console.print(f"[yellow]{latest} is available.[/yellow] Run `moodle update`.")
+    else:
+        console.print("Up to date.")
+
+
+@app.command("update")
+@handle_errors
+def update_cmd(as_json: JsonOpt = False) -> None:
+    """Upgrade this installation of moodle-cli to the latest GitHub release."""
+    latest = latest_release()
+    if not is_newer(latest, __version__):
+        if as_json:
+            _emit_json({"action": "up-to-date", "version": __version__})
+        else:
+            console.print(f"[green]Already up to date[/green] ({__version__}).")
+        return
+
+    env = detect()
+    extras = installed_extras()
+    if env.kind == "editable":
+        raise MoodleError(
+            "This moodle is an editable install from a checkout. Update it with `git pull` instead."
+        )
+    uv = _require_uv(env, extras, latest)
+
+    if env.kind == "uv-tool":
+        argv = _uv_tool_reinstall(uv, extras, latest)
+    else:
+        argv = pip_command(uv, env.python, git_spec(extras, latest))
+
+    output = run(argv, capture=as_json)
+    if as_json:
+        _emit_json(
+            {
+                "action": "updated",
+                "from": __version__,
+                "to": latest,
+                "environment": env.kind,
+                "command": argv,
+                "output": output,
+            }
+        )
+        return
+    console.print(f"[green]Updated[/green] {__version__} -> {latest}.")
 
 
 def main() -> None:

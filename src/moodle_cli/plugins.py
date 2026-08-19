@@ -32,10 +32,13 @@ API_VERSION = 1
 ENTRY_POINT_GROUP = "moodle_cli.plugins"
 DISABLE_ENV = "MOODLE_NO_PLUGINS"
 CORE_DISTRIBUTION = "moodle-cli"
+# The name "moodle-cli" is taken on PyPI by an unrelated package, so the core is never
+# installed from an index — every install/reinstall spec resolves against this repo instead.
+CORE_REPO_URL = "https://github.com/varbelaiz/moodle-cli"
 
 # Command groups the core owns. A plugin mounted over one of these would shadow it, and a
 # shadowed `auth login` is a password prompt from somewhere the user did not expect.
-RESERVED_NAMES = frozenset({"auth", "course", "courses", "plugins"})
+RESERVED_NAMES = frozenset({"auth", "course", "courses", "plugins", "update", "version"})
 
 # An extra that installs several plugins at once names no plugin of its own.
 AGGREGATE_EXTRAS = frozenset({"all"})
@@ -171,6 +174,7 @@ def reset() -> None:
     """Forget the discovery and catalog caches. For tests, and only for tests."""
     _discover.cache_clear()
     catalog.cache_clear()
+    extra_distributions.cache_clear()
 
 
 # -- mounting ----------------------------------------------------------------------
@@ -260,6 +264,7 @@ class CatalogEntry:
     problem: str | None  # installed but rejected, and why
 
 
+@cache
 def extra_distributions() -> dict[str, str]:
     """Map each plugin extra to the distribution it installs, from the core's metadata.
 

@@ -19,13 +19,19 @@ from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Literal
 
+from packaging.version import Version
+
 from moodle_cli.errors import MoodleError
-from moodle_cli.plugins import CORE_DISTRIBUTION
+from moodle_cli.plugins import CORE_DISTRIBUTION, CORE_REPO_URL
+from moodle_cli.update import is_exact_release
 
 Kind = Literal["uv-tool", "uv-managed", "editable", "unmanaged"]
 
 # `uv tool list --show-with` appends the injected set to the tool's own line.
 _WITH_CLAUSE = re.compile(r"\[with:\s*([^\]]*)\]")
+
+# hatch-vcs's local segment for a non-tag build, e.g. "gd976818f1.d20260819".
+_COMMIT_HASH = re.compile(r"g([0-9a-f]+)")
 
 
 @dataclass(frozen=True)
@@ -124,16 +130,41 @@ def injected_packages(uv: str) -> list[str] | None:
     return None
 
 
-def install_command(uv: str, extras: Iterable[str], injected: Sequence[str]) -> list[str]:
+def resolved_ref(version: str) -> str:
+    """The git ref that installs exactly `version`: its tag if it has one, else its commit.
+
+    A non-tag hatch-vcs `version` carries the source commit in its local segment (e.g.
+    "0.2.1.dev3+gd976818f1.d20260819"), so a checkout that isn't on a release can still be
+    pinned to the exact commit it came from instead of refusing to reinstall it.
+    """
+    if is_exact_release(version):
+        return f"v{version}"
+    local = Version(version).local or ""
+    match = _COMMIT_HASH.search(local)
+    if match is None:
+        raise MoodleError(f"Could not find a commit hash in version {version!r}.")
+    return match.group(1)
+
+
+def git_spec(extras: Iterable[str], ref: str) -> str:
+    """The PEP 508 direct reference that installs the core, with `extras`, at `ref`.
+
+    The core is never resolved from an index: "moodle-cli" on PyPI is a different,
+    unrelated package, so every install/reinstall spec names this repo directly.
+    """
+    wanted = sorted(extras)
+    name = f"{CORE_DISTRIBUTION}[{','.join(wanted)}]" if wanted else CORE_DISTRIBUTION
+    return f"{name} @ git+{CORE_REPO_URL}@{ref}"
+
+
+def install_command(uv: str, extras: Iterable[str], injected: Sequence[str], ref: str) -> list[str]:
     """The full `uv tool install` that leaves the environment holding exactly this set.
 
     Everything is restated because `--with` replaces rather than adds, and `--reinstall` is
     required because uv would otherwise see the requirement already satisfied and do
     nothing.
     """
-    wanted = sorted(extras)
-    spec = f"{CORE_DISTRIBUTION}[{','.join(wanted)}]" if wanted else CORE_DISTRIBUTION
-    argv = [uv, "tool", "install", "--reinstall", spec]
+    argv = [uv, "tool", "install", "--reinstall", git_spec(extras, ref)]
     for package in injected:
         argv += ["--with", package]
     return argv

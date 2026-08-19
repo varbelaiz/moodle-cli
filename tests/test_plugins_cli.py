@@ -91,6 +91,9 @@ def _environment(
         lambda: Environment(kind, Path("/env/bin/python"), "/usr/bin/uv"),  # type: ignore[arg-type]
     )
     monkeypatch.setattr(cli, "injected_packages", lambda uv: injected)
+    # `_plan()` pins the core to its own version, which only works from an exact release;
+    # this checkout's real version is an untagged dev build, so tests pin a clean one.
+    monkeypatch.setattr(cli, "__version__", "0.1.0")
 
 
 # -- list ----------------------------------------------------------------------------
@@ -242,7 +245,7 @@ def test_plugins_install_preserves_packages_injected_by_hand(
         "tool",
         "install",
         "--reinstall",
-        "moodle-cli[anydoc]",
+        f"moodle-cli[anydoc] @ git+https://github.com/varbelaiz/moodle-cli@v{cli.__version__}",
         "--with",
         "some-unrelated-tool==1.2",
     ]
@@ -258,7 +261,10 @@ def test_plugins_install_carries_the_extras_already_present(
     result = runner.invoke(cli.app, ["plugins", "install", "panopto"])
 
     assert result.exit_code == 0
-    assert "moodle-cli[anydoc,panopto]" in recorded[0]
+    assert (
+        f"moodle-cli[anydoc,panopto] @ git+https://github.com/varbelaiz/moodle-cli@v{cli.__version__}"
+        in recorded[0]
+    )
 
 
 def test_plugins_install_does_not_restate_a_plugin_uv_reports_as_injected(
@@ -331,6 +337,7 @@ def test_plugins_install_without_uv_says_what_to_run(
 ) -> None:
     catalog_of(_entry("anydoc"))
     monkeypatch.setattr(cli, "detect", lambda: Environment("unmanaged", Path("/p"), None))
+    monkeypatch.setattr(cli, "__version__", "0.1.0")
 
     result = runner.invoke(cli.app, ["plugins", "install", "anydoc"])
 
@@ -354,7 +361,7 @@ def test_plugins_install_in_a_plain_venv_targets_that_interpreter(
         "install",
         "--python",
         str(Path("/env/bin/python")),
-        "moodle-cli[anydoc]",
+        f"moodle-cli[anydoc] @ git+https://github.com/varbelaiz/moodle-cli@v{cli.__version__}",
     ]
 
 
@@ -373,7 +380,10 @@ def test_plugins_uninstall_drops_only_the_named_extra(
     result = runner.invoke(cli.app, ["plugins", "uninstall", "panopto"])
 
     assert result.exit_code == 0
-    assert "moodle-cli[anydoc]" in recorded[0]
+    assert (
+        f"moodle-cli[anydoc] @ git+https://github.com/varbelaiz/moodle-cli@v{cli.__version__}"
+        in recorded[0]
+    )
 
 
 def test_plugins_uninstall_is_a_no_op_when_it_was_never_installed(
