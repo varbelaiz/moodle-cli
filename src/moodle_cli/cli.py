@@ -58,9 +58,10 @@ from moodle_cli.toolenv import (
     injected_packages,
     install_command,
     pip_command,
+    resolved_ref,
     run,
 )
-from moodle_cli.update import is_exact_release, is_newer, latest_release
+from moodle_cli.update import is_newer, latest_release
 
 console = Console()
 err_console = Console(stderr=True)
@@ -1075,13 +1076,8 @@ def _plan(name: str, *, keep: bool) -> tuple[Environment, list[str]]:
             "This moodle is an editable install from a checkout. Change its extras there "
             f"instead, with `uv sync --extra {name}`."
         )
-    if not is_exact_release(__version__):
-        raise MoodleError(
-            "This moodle is not installed from a tagged release, so its extras cannot be "
-            "changed without also changing its version. Run `moodle update` first."
-        )
-    # Pins the core to its current version: changing extras must never move the core.
-    ref = f"v{__version__}"
+    # Pins the core to its current commit or tag: changing extras must never move the core.
+    ref = resolved_ref(__version__)
     wanted = installed_extras() | {name} if keep else installed_extras() - {name}
     uv = _require_uv(env, wanted, ref)
 
