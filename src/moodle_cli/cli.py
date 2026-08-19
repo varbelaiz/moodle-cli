@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from moodle_cli._version import __version__ as __version__
+from moodle_cli import __version__ as __version__
 from moodle_cli.auth import TokenStore, mint_token
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
