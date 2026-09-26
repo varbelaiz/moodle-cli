@@ -61,7 +61,7 @@ from moodle_cli.toolenv import (
     resolved_ref,
     run,
 )
-from moodle_cli.update import is_newer, latest_release
+from moodle_cli.update import is_newer, latest_release, pending_update
 
 console = Console()
 err_console = Console(stderr=True)
@@ -82,6 +82,26 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(courses_app, name="courses")
 app.add_typer(course_app, name="course")
 app.add_typer(plugins_app, name="plugins")
+
+
+@app.callback()
+def _root(ctx: typer.Context) -> None:
+    # `version` and `update` report on releases themselves, and right after an update the
+    # running process is still the old version, so the notice would be wrong.
+    if ctx.invoked_subcommand not in {"version", "update"}:
+        ctx.call_on_close(_announce_update)
+
+
+def _announce_update() -> None:
+    """Point at `moodle update` on stderr, so `--json` output on stdout stays parseable."""
+    latest = pending_update(__version__)
+    if latest:
+        err_console.print(
+            f"[yellow]moodle-cli {latest} is available[/yellow] "
+            f"(installed {__version__}). Run `moodle update`.",
+            soft_wrap=True,
+        )
+
 
 # Mounted at import rather than in main(), because the tests and any other embedder import
 # `app` directly; wiring only the entry point would give the plugin surface to a shell and
