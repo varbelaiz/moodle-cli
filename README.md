@@ -180,6 +180,7 @@ notes. An installed plugin adds a group of its own; `moodle plugins list` shows 
 | `MOODLE_TOKEN` | no | Use this token directly and skip the keyring. |
 | `MOODLE_USER` | no | Username, so `auth login` does not prompt for it. |
 | `MOODLE_PASS` | no | Password, for minting a token unattended. |
+| `MOODLE_NO_UPDATE_CHECK` | no | Any non-empty value turns off the daily new-release notice. See [Updating](docs/updating.md#update-notice). |
 
 These can be set in the environment or in a `.env` file at the project root; see
 [`.env.example`](.env.example). Token resolution order is `MOODLE_TOKEN`, then the keyring,
