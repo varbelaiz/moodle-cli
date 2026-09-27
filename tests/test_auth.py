@@ -12,7 +12,7 @@ import respx
 
 from moodle_cli.auth import TokenStore, mint_token, resolve_token
 from moodle_cli.config import Config
-from moodle_cli.errors import AuthError
+from moodle_cli.errors import AuthError, UnreachableError
 from tests.conftest import BASE_URL, TOKEN_URL
 
 
@@ -37,6 +37,14 @@ def test_mint_token_returns_token() -> None:
         return_value=httpx.Response(200, json={"token": "abc123", "privatetoken": None})
     )
     assert mint_token(BASE_URL, "user", "pass") == "abc123"
+
+
+@respx.mock
+def test_mint_token_reports_an_unreachable_campus_by_its_url() -> None:
+    """Not an `AuthError`: nothing is wrong with the credentials, the campus never answered."""
+    respx.post(TOKEN_URL).mock(side_effect=httpx.ConnectError("[Errno 8] nodename"))
+    with pytest.raises(UnreachableError, match=f"Could not reach {BASE_URL}"):
+        mint_token(BASE_URL, "user", "pass")
 
 
 @respx.mock

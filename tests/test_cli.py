@@ -338,6 +338,28 @@ def test_missing_campus_url_is_a_clean_error_not_a_traceback(
     assert "Error: No campus URL configured" in result.output
 
 
+@respx.mock
+def test_an_unreachable_campus_on_login_is_a_clean_error_not_a_traceback() -> None:
+    respx.post(TOKEN_URL).mock(side_effect=httpx.ConnectError("[Errno 8] nodename"))
+
+    result = runner.invoke(app, ["auth", "login", "-u", "someone"], input="secret\n")
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert f"Error: Could not reach {BASE_URL}" in result.output
+
+
+@respx.mock
+def test_an_unreachable_campus_on_any_command_is_a_clean_error_not_a_traceback() -> None:
+    respx.post(REST_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
+
+    result = runner.invoke(app, ["courses", "list"])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert f"Error: Could not reach {BASE_URL}: timed out" in result.output
+
+
 # -- auth and the saved campus URL ------------------------------------------------
 
 SITE_INFO = {"sitename": "Example University", "fullname": "Jane Doe", "userid": 42}

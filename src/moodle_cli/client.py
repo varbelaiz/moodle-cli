@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import html
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from types import TracebackType
 from typing import Any
 
 import httpx
 
-from moodle_cli.errors import MoodleAPIError, MoodleError
+from moodle_cli.errors import MoodleAPIError, MoodleError, UnreachableError
 from moodle_cli.models import (
     Announcement,
     Assignment,
@@ -77,6 +78,21 @@ def _scalar(value: Any) -> str:
     return str(value)
 
 
+@contextmanager
+def reaching(url: str) -> Iterator[None]:
+    """Report a network failure inside the block as an `UnreachableError` naming ``url``.
+
+    Pass the URL the user would recognise, never the request's own: a file request carries
+    the token in its query string.
+    """
+    try:
+        yield
+    except httpx.TransportError as exc:
+        # A pool timeout carries no message; its class name still says what happened.
+        reason = str(exc) or type(exc).__name__
+        raise UnreachableError(f"Could not reach {url}: {reason}") from exc
+
+
 class MoodleClient:
     """Typed access to the subset of the Moodle API this tool needs.
 
@@ -121,7 +137,8 @@ class MoodleClient:
             "wsfunction": function,
             **params,
         }
-        response = self._http.post(f"{self.base_url}{REST_PATH}", data=_flatten_params(payload))
+        with reaching(self.base_url):
+            response = self._http.post(f"{self.base_url}{REST_PATH}", data=_flatten_params(payload))
         response.raise_for_status()
         try:
             body = response.json()
