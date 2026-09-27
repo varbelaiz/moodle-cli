@@ -2,11 +2,17 @@
 
 Credentials come from the environment (optionally seeded by a .env file). The password is
 only ever needed to mint a token; once one is stored in the keyring it can be removed.
+
+The campus URL can also be saved to a per-user file, so a tool installed on the PATH -- or
+an MCP server launched from an arbitrary directory -- reaches the same campus the keyring
+token belongs to without a .env nearby.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,9 +73,54 @@ class Config:
         return self.base_url
 
 
+def _config_dir() -> Path:
+    """The per-user settings directory, following each platform's convention."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "moodle-cli"
+    if sys.platform == "win32":
+        root = os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming"
+    else:
+        root = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+    return Path(root) / "moodle-cli"
+
+
+def _settings_path() -> Path:
+    return _config_dir() / "config.json"
+
+
+def saved_url() -> str | None:
+    """The campus URL saved by `save_url`, or None when there is none to read.
+
+    An unreadable or malformed file counts as none: the resulting error points at
+    `auth login`, which writes the file afresh.
+    """
+    try:
+        settings = json.loads(_settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    url = settings.get("url") if isinstance(settings, dict) else None
+    return url if isinstance(url, str) and url else None
+
+
+def save_url(url: str) -> None:
+    """Persist the campus URL for every later run, from any directory."""
+    path = _settings_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"url": url}), encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"Could not save the campus URL to {path}: {exc}") from exc
+
+
 def load_config(base_url: str | None = None) -> Config:
+    """Resolve configuration, taking the campus URL from the first source that has one.
+
+    Precedence is `base_url`, then MOODLE_URL (environment or .env), then the saved URL.
+    The variable beats the saved file so it stays a per-shell override, e.g. to point a
+    checkout at another campus without touching what an installed tool uses.
+    """
     ensure_env_loaded()
-    url = base_url or os.environ.get("MOODLE_URL")
+    url = base_url or os.environ.get("MOODLE_URL") or saved_url()
     if not url:
         raise ConfigError(
             "No campus URL configured. Set MOODLE_URL in the environment or a .env file."
