@@ -323,6 +323,20 @@ def test_api_error_is_reported_cleanly(courses_payload: dict[str, Any]) -> None:
     assert "invalidtoken" in result.output
 
 
+def test_missing_campus_url_is_a_clean_error_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MOODLE_URL")
+
+    result = runner.invoke(app, ["auth", "status"])
+
+    # The runner reports an uncaught exception as exit code 1 too; only a clean exit
+    # surfaces as SystemExit.
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "Error: No campus URL configured" in result.output
+
+
 # -- links, announcements, assignments and grades ---------------------------------
 
 

@@ -22,6 +22,10 @@ class MoodleAPIError(MoodleError):
         super().__init__(f"{message} [{errorcode}]{where}")
 
 
+class ConfigError(MoodleError):
+    """Required configuration is missing."""
+
+
 class AuthError(MoodleError):
     """Could not obtain or resolve a token."""
 
