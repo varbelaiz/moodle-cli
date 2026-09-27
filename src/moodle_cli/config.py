@@ -123,7 +123,7 @@ def load_config(base_url: str | None = None) -> Config:
     url = base_url or os.environ.get("MOODLE_URL") or saved_url()
     if not url:
         raise ConfigError(
-            "No campus URL configured. Set MOODLE_URL in the environment or a .env file."
+            "No campus URL configured. Run 'moodle auth login --url <campus>' or set MOODLE_URL."
         )
     return Config(
         base_url=url.rstrip("/"),
