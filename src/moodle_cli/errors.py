@@ -32,3 +32,7 @@ class AuthError(MoodleError):
 
 class DownloadError(MoodleError):
     """A file download completed but the result is not the expected file."""
+
+
+class UnreachableError(MoodleError):
+    """A host could not be reached: the name did not resolve, or it refused or timed out."""

@@ -10,6 +10,7 @@ import httpx
 import keyring
 from keyring.errors import KeyringError
 
+from moodle_cli.client import reaching
 from moodle_cli.config import KEYRING_SERVICE, MOBILE_SERVICE, Config
 from moodle_cli.errors import AuthError
 
@@ -26,10 +27,11 @@ def mint_token(
     owned = client is None
     http = client or httpx.Client(timeout=30, follow_redirects=True)
     try:
-        response = http.post(
-            f"{base_url.rstrip('/')}/login/token.php",
-            data={"username": username, "password": password, "service": service},
-        )
+        with reaching(base_url):
+            response = http.post(
+                f"{base_url.rstrip('/')}/login/token.php",
+                data={"username": username, "password": password, "service": service},
+            )
         payload = response.json()
     finally:
         if owned:

@@ -10,7 +10,7 @@ import respx
 from pydantic import ValidationError
 
 from moodle_cli.client import SORTS, VIEWS, MoodleClient, _flatten_params, check_api_error
-from moodle_cli.errors import MoodleAPIError, MoodleError
+from moodle_cli.errors import MoodleAPIError, MoodleError, UnreachableError
 from tests.conftest import BASE_URL, REST_URL, posted_params
 
 
@@ -61,6 +61,24 @@ def test_call_raises_on_non_json_response(client: MoodleClient) -> None:
     respx.post(REST_URL).mock(return_value=httpx.Response(200, text="<html>maintenance</html>"))
     with pytest.raises(MoodleError, match="non-JSON"):
         client.get_site_info()
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        (httpx.ConnectError("[Errno 8] nodename nor servname provided"), "[Errno 8] nodename"),
+        (httpx.ConnectTimeout("timed out"), "timed out"),
+        (httpx.PoolTimeout(""), "PoolTimeout"),
+    ],
+)
+@respx.mock
+def test_an_unreachable_campus_is_a_moodle_error_naming_the_url(
+    client: MoodleClient, failure: httpx.TransportError, reason: str
+) -> None:
+    respx.post(REST_URL).mock(side_effect=failure)
+    with pytest.raises(UnreachableError) as excinfo:
+        client.get_site_info()
+    assert str(excinfo.value).startswith(f"Could not reach {BASE_URL}: {reason}")
 
 
 # -- parameter encoding ----------------------------------------------------------
