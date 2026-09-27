@@ -19,7 +19,7 @@ import httpx
 import pytest
 import respx
 
-from moodle_cli import plugins
+from moodle_cli import plugins, update
 
 # Set before anything imports moodle_cli.cli or moodle_cli.mcp_server, because those mount
 # plugins at import time -- which happens during collection, before any fixture can run.
@@ -89,6 +89,15 @@ def no_plugins(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     plugins.reset()
     yield
     plugins.reset()
+
+
+@pytest.fixture(autouse=True)
+def no_update_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every CLI invocation off GitHub and out of the developer's real cache.
+
+    Tests of the notice itself unset the variable and point the cache at a tmp dir.
+    """
+    monkeypatch.setenv(update.DISABLE_ENV, "1")
 
 
 @pytest.fixture(autouse=True)

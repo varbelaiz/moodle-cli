@@ -2,9 +2,22 @@
 
 Releases are git tags on this repo, not packages on an index — the name `moodle-cli` is
 already taken on PyPI by an unrelated project, so an install always names this repo
-directly rather than resolving through a package index. `moodle version --check` and
-`moodle update` are the only commands here that make a network call outside a Moodle
-campus: both talk to the GitHub Releases API for this repo, nothing else.
+directly rather than resolving through a package index. The only network call this tool
+makes outside a Moodle campus is to the GitHub Releases API for this repo, nothing else.
+
+## Update notice
+
+Every command other than `version` and `update` ends with a one-line notice on stderr
+when a newer release exists, pointing at `moodle update`. It goes to stderr so `--json`
+output on stdout stays parseable, and it shows whether or not stdout is a terminal, so an
+agent driving the CLI sees it too.
+
+GitHub is asked at most once a day; the answer, including a failed check, is cached in
+`$XDG_CACHE_HOME/moodle-cli/update-check.json` (`~/.cache` when unset). A slow or
+unreachable GitHub costs at most two seconds once a day and never fails the command.
+
+Set `MOODLE_NO_UPDATE_CHECK` to any non-empty value to turn the notice and its network
+call off.
 
 ## `moodle version`
 

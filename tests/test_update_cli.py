@@ -1,4 +1,4 @@
-"""Tests for `moodle version` and `moodle update`.
+"""Tests for `moodle version`, `moodle update` and the update notice on other commands.
 
 The GitHub call and the packaging command are faked at the boundary, same as
 `test_plugins_cli.py`: what matters here is the argv `update` builds and when it decides
@@ -268,3 +268,32 @@ def test_update_json_reports_what_it_did(
     assert payload["from"] == "0.1.0"
     assert payload["to"] == "v0.2.0"
     assert payload["environment"] == "uv-tool"
+
+
+# -- update notice -----------------------------------------------------------------------
+
+
+def test_other_commands_announce_an_update_on_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    _pinned_version(monkeypatch, "0.1.0")
+    monkeypatch.setattr(cli, "pending_update", lambda current: "v0.2.0")
+
+    result = runner.invoke(cli.app, ["plugins", "list", "--json"])
+
+    assert result.exit_code == 0, result.stderr
+    json.loads(result.stdout)
+    assert "v0.2.0 is available" in result.stderr
+    assert "moodle update" in result.stderr
+
+
+@pytest.mark.parametrize("argv", [["version"], ["update"]])
+def test_version_and_update_do_not_announce_an_update(
+    monkeypatch: pytest.MonkeyPatch, recorded: list[Sequence[str]], argv: list[str]
+) -> None:
+    _pinned_version(monkeypatch, "0.2.0")
+    monkeypatch.setattr(cli, "latest_release", lambda: "v0.2.0")
+    monkeypatch.setattr(cli, "pending_update", lambda current: "v0.3.0")
+
+    result = runner.invoke(cli.app, argv)
+
+    assert result.exit_code == 0, result.stderr
+    assert "is available" not in result.stderr
