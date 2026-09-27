@@ -21,6 +21,7 @@ from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
 import httpx
 
+from moodle_cli.client import reaching
 from moodle_cli.errors import DownloadError, MoodleAPIError
 from moodle_cli.models import CourseFile, Module, Section
 
@@ -362,7 +363,10 @@ def download_file(
     partial = destination.with_name(destination.name + ".part")
 
     try:
-        with http.stream("GET", file.fileurl, params={"token": token}) as response:
+        with (
+            reaching(file.fileurl),
+            http.stream("GET", file.fileurl, params={"token": token}) as response,
+        ):
             response.raise_for_status()
             _reject_error_payload(response, file)
 
@@ -446,7 +450,10 @@ def download_link(
     retried = False
 
     while True:
-        with http.stream("GET", request_url, params=params) as response:
+        with (
+            reaching(export.export_url),
+            http.stream("GET", request_url, params=params) as response,
+        ):
             if response.is_error:
                 hint = (
                     ' -- the doc likely is not shared "anyone with the link"'
