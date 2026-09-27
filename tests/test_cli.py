@@ -179,6 +179,28 @@ def test_download_reports_failure_and_exits_nonzero(
 
 
 @respx.mock
+def test_an_unreachable_file_is_one_failed_download_not_a_traceback(
+    courses_payload: dict[str, Any],
+    contents_payload: list[dict[str, Any]],
+    tmp_cwd: Path,
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+    respx.get(url__startswith=f"{BASE_URL}/webservice/pluginfile.php").mock(
+        side_effect=httpx.ConnectTimeout("timed out")
+    )
+
+    result = runner.invoke(app, ["course", "download", "IOS460", "--type", "resource"])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "1 failed" in result.stdout
+    assert "FAIL 00 - General/Programa - Taller.pdf: Could not reach" in result.output
+
+
+@respx.mock
 def test_download_selects_an_exact_filename(
     courses_payload: dict[str, Any],
     contents_payload: list[dict[str, Any]],

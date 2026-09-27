@@ -9,6 +9,7 @@ from __future__ import annotations
 import itertools
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -19,6 +20,7 @@ from typer.testing import CliRunner
 from moodle_cli.cli import app
 from moodle_cli.errors import MoodleAPIError
 from moodle_cli.mcp_server import (
+    download_course_files,
     get_assignment_status,
     get_assignments,
     get_course_announcements,
@@ -31,7 +33,7 @@ from moodle_cli.mcp_server import (
     list_participants,
     search_courses,
 )
-from tests.conftest import REST_URL, posted_params, route_by_function
+from tests.conftest import BASE_URL, REST_URL, posted_params, route_by_function
 
 pytestmark = pytest.mark.usefixtures("configured_env")
 
@@ -584,3 +586,25 @@ def test_get_grades_surfaces_the_permission_error_instead_of_hiding_it(
 
     with pytest.raises(MoodleAPIError, match="nopermissiontoviewgrades"):
         get_grades("IOS460")
+
+
+@respx.mock
+def test_an_unreachable_file_is_a_failed_manifest_entry_not_an_aborted_tool(
+    courses_payload: dict[str, Any],
+    contents_payload: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        core_course_get_contents=contents_payload,
+    )
+    respx.get(url__startswith=f"{BASE_URL}/webservice/pluginfile.php").mock(
+        side_effect=httpx.ConnectTimeout("timed out")
+    )
+
+    result = download_course_files("IOS460", output_dir=str(tmp_path), module_types=["resource"])
+
+    assert result["summary"]["failed"] == 1
+    [entry] = result["files"]
+    assert entry["status"] == "failed"
+    assert entry["error"].startswith(f"Could not reach {BASE_URL}/webservice/pluginfile.php")

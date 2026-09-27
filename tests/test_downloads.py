@@ -6,6 +6,7 @@ Those must fail loudly and leave nothing behind on disk.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ from moodle_cli.downloads import (
     plan_link_downloads,
     sanitize,
 )
-from moodle_cli.errors import DownloadError, MoodleAPIError
+from moodle_cli.errors import DownloadError, MoodleAPIError, UnreachableError
 from moodle_cli.models import CourseFile, Module, Section
 
 FILE_URL = "https://campus.example.edu/webservice/pluginfile.php/1/mod_resource/content/5/a.pdf"
@@ -210,6 +211,29 @@ def test_download_file_rejects_json_error_served_as_200(pdf: CourseFile, tmp_pat
     with httpx.Client() as http, pytest.raises(MoodleAPIError, match="missingparam"):
         download_file(http, pdf, "tok", destination)
 
+    assert not destination.exists()
+    assert list(tmp_path.glob("*.part")) == []
+
+
+class _DroppedStream(httpx.SyncByteStream):
+    """A body that times out after its first chunk, as a stalled connection does."""
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield b"hello"
+        raise httpx.ReadTimeout("timed out")
+
+
+@respx.mock
+def test_download_file_reports_a_dropped_connection_by_url_leaving_nothing_on_disk(
+    pdf: CourseFile, tmp_path: Path
+) -> None:
+    respx.get(FILE_URL).mock(return_value=httpx.Response(200, stream=_DroppedStream()))
+    destination = tmp_path / "a.pdf"
+
+    with httpx.Client() as http, pytest.raises(UnreachableError) as excinfo:
+        download_file(http, pdf, "secret-token", destination)
+
+    assert str(excinfo.value) == f"Could not reach {FILE_URL}: timed out"
     assert not destination.exists()
     assert list(tmp_path.glob("*.part")) == []
 
@@ -534,6 +558,18 @@ def test_download_link_writes_a_deterministic_export(
 
     assert result.status is DownloadStatus.DOWNLOADED
     assert destination.read_bytes() == b"pptx bytes"
+
+
+@respx.mock
+def test_download_link_reports_an_unreachable_host_by_url(
+    slides_link: CourseFile, tmp_path: Path
+) -> None:
+    respx.get(_SLIDES_EXPORT_URL).mock(side_effect=httpx.ConnectError("[Errno 8] nodename"))
+
+    with httpx.Client() as http, pytest.raises(UnreachableError, match="Could not reach"):
+        download_link(http, slides_link, tmp_path / "Clase 1.pptx")
+
+    assert list(tmp_path.iterdir()) == []
 
 
 @respx.mock
