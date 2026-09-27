@@ -76,6 +76,28 @@ def login_error_html(logintoken: str = "tok-456") -> str:
     )
 
 
+def mfa_page_html(sesskey: str = "sessmfa") -> str:
+    """Moodle's MFA step: the code form, then the cancel form that logs out."""
+    action = f"{BASE_URL}/admin/tool/mfa/auth.php"
+    return (
+        f'<script>M.cfg = {{"sesskey":"{sesskey}"}};</script>'
+        f'<form action="{action}" method="post">'
+        '<input name="factor" type="alphaext" value="email">'
+        f'<input name="sesskey" type="hidden" value="{sesskey}">'
+        '<input name="_qf__tool_mfa_local_form_login_form" type="hidden" value="1">'
+        '<input name="verificationcode" type="text" value="">'
+        '<input name="factor_token_trust" type="hidden" value="0">'
+        '<input name="factor_token_trust" type="checkbox" value="1">'
+        '<input name="submitbutton" type="submit" value="Continue">'
+        "</form>"
+        f'<form action="{action}" method="POST">'
+        '<input name="logout" type="hidden" value="true">'
+        f'<input name="sesskey" type="hidden" value="{sesskey}">'
+        '<input name="cancelmfa" type="submit" value="Cancel">'
+        "</form>"
+    )
+
+
 def lti_launch_html(action: str, fields: dict[str, str]) -> str:
     inputs = "".join(
         f'<input type="hidden" name="{name}" value="{value}"/>' for name, value in fields.items()
