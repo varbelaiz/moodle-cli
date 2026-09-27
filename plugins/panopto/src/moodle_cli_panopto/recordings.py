@@ -103,6 +103,20 @@ def list_recordings(moodle: MoodleWebSession, course_id: int) -> list[Recording]
             f"course {course_id}: block_panopto_get_content returned a non-JSON response"
         ) from exc
 
+    # Moodle rejects the whole request, rather than the one call in it, with a bare
+    # error object. A redirect is what a page-level login check answers a session
+    # still waiting on its MFA step with.
+    if isinstance(body, dict) and body.get("errorcode") == "redirecterrordetected":
+        raise PanoptoError(
+            f"course {course_id}: the campus redirected block_panopto_get_content; "
+            "the Moodle session has not completed multi-factor authentication"
+        )
+    if isinstance(body, dict) and body.get("errorcode"):
+        raise PanoptoError(
+            f"course {course_id}: block_panopto_get_content failed: "
+            f"{body.get('error')} [{body['errorcode']}]"
+        )
+
     if not isinstance(body, list) or not body or not isinstance(body[0], dict):
         raise PanoptoError(
             f"course {course_id}: block_panopto_get_content returned an unexpected response"
