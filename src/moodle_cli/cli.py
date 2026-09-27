@@ -19,7 +19,7 @@ from rich.table import Table
 from moodle_cli import __version__ as __version__
 from moodle_cli.auth import TokenStore, mint_token
 from moodle_cli.client import MoodleClient
-from moodle_cli.config import load_config
+from moodle_cli.config import load_config, save_url
 from moodle_cli.downloads import (
     DownloadResult,
     DownloadStatus,
@@ -33,7 +33,7 @@ from moodle_cli.downloads import (
     plan_link_downloads,
     sanitize,
 )
-from moodle_cli.errors import MoodleError
+from moodle_cli.errors import ConfigError, MoodleError
 from moodle_cli.models import (
     Announcement,
     Assignment,
@@ -187,16 +187,23 @@ def _format_year(value: int) -> str:
 @auth_app.command("login")
 @handle_errors
 def auth_login(
+    url: Annotated[
+        str | None,
+        typer.Option("--url", help="Campus base URL, saved for every later command."),
+    ] = None,
     username: Annotated[
         str | None, typer.Option("--username", "-u", help="Campus username.")
     ] = None,
 ) -> None:
-    """Mint a web-service token and store it in the system keyring.
+    """Mint a web-service token, store it in the system keyring and save the campus URL.
 
     The password is prompted for and never accepted as an argument, which would leave it in
     your shell history. Once the token is stored you can remove MOODLE_PASS from .env.
     """
-    config = load_config()
+    try:
+        config = load_config(base_url=url)
+    except ConfigError:
+        config = load_config(base_url=typer.prompt("Campus URL"))
     user = username or config.username or typer.prompt("Username")
     password = config.password or typer.prompt("Password", hide_input=True)
 
@@ -208,6 +215,9 @@ def auth_login(
     # answer with a different token than the login produced.
     with MoodleClient(config.base_url, token) as client:
         info = client.get_site_info()
+    # Saved only once the campus has answered, so a mistyped URL is never persisted, and
+    # on every login, so the saved URL always names the campus the stored token is for.
+    save_url(config.base_url)
 
     console.print(f"[green]Logged in[/green] as {info.fullname} (id {info.userid})")
     console.print(f"  site: {info.sitename}  ({info.release})")
@@ -234,7 +244,7 @@ def auth_status() -> None:
 @auth_app.command("logout")
 @handle_errors
 def auth_logout() -> None:
-    """Delete the stored token from the keyring."""
+    """Delete the stored token from the keyring, keeping the saved campus URL."""
     config = load_config()
     if TokenStore().delete(config.keyring_key):
         console.print("[green]Token deleted from the keyring.[/green]")
