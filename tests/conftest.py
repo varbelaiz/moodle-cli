@@ -62,13 +62,22 @@ def posted_params(request: httpx.Request) -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
-    """Keep the developer's real .env and keyring out of the unit tests.
+def isolated_env(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Keep the developer's real .env, saved campus URL and keyring out of the unit tests.
 
-    Without this, a .env in the repo root would silently supply real credentials.
+    Without this, a .env in the repo root or a URL saved by a real `auth login` would
+    silently point the suite at the real campus, and a test that logs in would overwrite
+    the developer's saved URL. The settings directory is a fresh one per test, apart from
+    `tmp_path`, so a test asserting on the contents of `tmp_path` never sees it.
     """
     if "live" in request.keywords:
         return
+    config_dir = tmp_path_factory.mktemp("config")
+    monkeypatch.setattr("moodle_cli.config._config_dir", lambda: config_dir)
     monkeypatch.setattr("moodle_cli.config._find_dotenv", lambda: None)
     monkeypatch.setattr("moodle_cli.config._ENV_LOADED", False)
     for var in ("MOODLE_URL", "MOODLE_USER", "MOODLE_PASS", "MOODLE_TOKEN"):
