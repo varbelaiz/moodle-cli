@@ -6,16 +6,24 @@ in place.
 ## `moodle auth login`
 
 ```
-moodle auth login [--username, -u USERNAME]
+moodle auth login [--url URL] [--username, -u USERNAME]
 ```
 
 | Option | Description |
 | --- | --- |
+| `--url` | Campus base URL. Falls back to `MOODLE_URL`, then the saved URL, then a prompt. |
 | `--username`, `-u` | Campus username. Prompted for if omitted. |
 
 Mints a web-service token and stores it in the system keyring. The password is always
 prompted for, never taken as an argument — that would leave it in shell history. Once the
 token is stored, `MOODLE_PASS` can be removed from `.env`.
+
+The campus URL is saved only once the campus has confirmed the new token, so a mistyped URL
+is never kept. It lives in the per-user config directory
+(`~/Library/Application Support/moodle-cli` on macOS, `%APPDATA%\moodle-cli` on Windows,
+`$XDG_CONFIG_HOME/moodle-cli` or `~/.config/moodle-cli` elsewhere), and every later command,
+including the MCP server, reads it when `MOODLE_URL` is unset. Each login replaces it, so it
+always names the campus the stored token belongs to.
 
 Example output:
 
@@ -49,7 +57,8 @@ Authenticated as Jane Doe (id 42)
 moodle auth logout
 ```
 
-Deletes the stored token from the keyring.
+Deletes the stored token from the keyring. The saved campus URL stays, so logging back in
+needs no `--url`.
 
 Example output:
 

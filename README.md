@@ -48,16 +48,16 @@ prove that moodle-cli works with no plugins present.
 
 ## Authentication
 
-Point the tool at your campus and log in once:
+Log in once, naming your campus:
 
 ```bash
-export MOODLE_URL=https://campus.example.edu
-moodle auth login
+moodle auth login --url https://campus.example.edu
 ```
 
 `auth login` exchanges your password for a long-lived web-service token and stores it in
 the system keyring. The password is prompted for, never taken as an argument, and is not
-needed again afterwards.
+needed again afterwards. Once the login succeeds, the campus URL is saved in your user
+config directory, so every later command and the MCP server work from any directory.
 
 If your campus uses SSO only and you have no local Moodle password, `login/token.php`
 cannot mint a token for you. Where the site allows it, you can create one by hand under
@@ -105,9 +105,9 @@ notes. An installed plugin adds a group of its own; `moodle plugins list` shows 
 
 | CLI | Description |
 | --- | --- |
-| `moodle auth login` | Mint a token and store it in the keyring. |
+| `moodle auth login` | Mint a token, store it in the keyring and save the campus URL. |
 | `moodle auth status` | Show who the stored token belongs to, and what it can do. |
-| `moodle auth logout` | Delete the stored token. |
+| `moodle auth logout` | Delete the stored token, keeping the saved campus URL. |
 
 ### [Updating](docs/updating.md)
 
@@ -176,15 +176,16 @@ notes. An installed plugin adds a group of its own; `moodle plugins list` shows 
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `MOODLE_URL` | yes | Campus base URL, e.g. `https://campus.example.edu`. |
+| `MOODLE_URL` | no | Campus base URL, overriding the one saved by `auth login`. |
 | `MOODLE_TOKEN` | no | Use this token directly and skip the keyring. |
 | `MOODLE_USER` | no | Username, so `auth login` does not prompt for it. |
 | `MOODLE_PASS` | no | Password, for minting a token unattended. |
 | `MOODLE_NO_UPDATE_CHECK` | no | Any non-empty value turns off the daily new-release notice. See [Updating](docs/updating.md#update-notice). |
 
 These can be set in the environment or in a `.env` file at the project root; see
-[`.env.example`](.env.example). Token resolution order is `MOODLE_TOKEN`, then the keyring,
-then minting a new one from `MOODLE_USER` and `MOODLE_PASS`.
+[`.env.example`](.env.example). The campus URL comes from `MOODLE_URL` if set, else from the
+one saved by `auth login`. Token resolution order is `MOODLE_TOKEN`, then the keyring, then
+minting a new one from `MOODLE_USER` and `MOODLE_PASS`.
 
 Storing `MOODLE_PASS` is only needed for unattended use. After `auth login` the token lives
 in the keyring and the password can be removed.
