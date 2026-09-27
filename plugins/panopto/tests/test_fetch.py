@@ -10,14 +10,17 @@ the LTI relay, DeliveryInfo/GenerateSRT -- goes through respx.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import sys
+from collections.abc import Callable, Iterator
+from http.cookiejar import Cookie
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 import respx
+from moodle_cli_panopto import device_trust, lti
 from moodle_cli_panopto import fetch as fetch_module
-from moodle_cli_panopto import lti
 from moodle_cli_panopto.fetch import (
     download_transcripts,
     get_transcript,
@@ -99,7 +102,7 @@ def _fake_login(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         fetch_module,
         "login",
-        lambda base_url, username, password: MoodleWebSession(
+        lambda base_url, username, password, **kwargs: MoodleWebSession(
             client=httpx.Client(base_url=BASE_URL), sesskey="sess-1"
         ),
     )
@@ -123,6 +126,63 @@ def _mock_transcript_chain(
         return_value=httpx.Response(200, json={"Delivery": {"AvailableLanguages": [3]}})
     )
     respx.get(GENERATE_SRT_URL).mock(return_value=httpx.Response(200, text=srt_text))
+
+
+def _trust_cookie(value: str) -> Cookie:
+    cookies = httpx.Cookies()
+    cookies.set("MFA_TOKEN_42", value, domain="campus.example.edu", path="/")
+    cookie = next(iter(cookies.jar))
+    cookie.expires = 4_000_000_000
+    return cookie
+
+
+# -- open_context ------------------------------------------------------------------------
+
+
+def test_open_context_relays_the_stored_trust_cookie_and_stores_a_newly_issued_one(
+    monkeypatch: pytest.MonkeyPatch, credentials: None
+) -> None:
+    device_trust.save(BASE_URL, _trust_cookie("old-secret"))
+    seen: dict[str, Any] = {}
+
+    def fake_login(base_url: str, username: str, password: str, **kwargs: Any) -> MoodleWebSession:
+        seen.update(kwargs)
+        return MoodleWebSession(
+            client=httpx.Client(base_url=BASE_URL),
+            sesskey="sess-1",
+            trusted_device=_trust_cookie("new-secret"),
+        )
+
+    monkeypatch.setattr(fetch_module, "open_client", lambda: FakeWsClient([], _course()))
+    monkeypatch.setattr(fetch_module, "login", fake_login)
+
+    with fetch_module.open_context():
+        pass
+
+    assert seen["trusted_device"].value == "old-secret"
+    stored = device_trust.load(BASE_URL)
+    assert stored is not None and stored.value == "new-secret"
+
+
+@pytest.mark.parametrize(("is_tty", "asks"), [(True, True), (False, False)])
+def test_open_context_asks_for_an_mfa_code_only_when_stdin_is_a_terminal(
+    monkeypatch: pytest.MonkeyPatch, credentials: None, is_tty: bool, asks: bool
+) -> None:
+    """Under the MCP server stdin is the protocol stream, never somewhere to prompt."""
+    seen: dict[str, Callable[[], str] | None] = {}
+
+    def fake_login(base_url: str, username: str, password: str, **kwargs: Any) -> MoodleWebSession:
+        seen["ask_code"] = kwargs["ask_code"]
+        return MoodleWebSession(client=httpx.Client(base_url=BASE_URL), sesskey="sess-1")
+
+    monkeypatch.setattr(fetch_module, "open_client", lambda: FakeWsClient([], _course()))
+    monkeypatch.setattr(fetch_module, "login", fake_login)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: is_tty)
+
+    with fetch_module.open_context():
+        pass
+
+    assert (seen["ask_code"] is not None) == asks
 
 
 # -- list_course_recordings -------------------------------------------------------------

@@ -38,6 +38,8 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 
     Every non-live test here fakes its own client/session rather than resolving real
     credentials, but this stays as a safety net against a future test that forgets to.
+    The keyring is an in-memory one per test: a login reads and writes the device-trust
+    cookie through it.
     """
     if "live" in request.keywords:
         return
@@ -45,6 +47,12 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
     monkeypatch.setattr("moodle_cli.config._ENV_LOADED", False)
     for var in ("MOODLE_URL", "MOODLE_USER", "MOODLE_PASS", "MOODLE_TOKEN"):
         monkeypatch.delenv(var, raising=False)
+    passwords: dict[tuple[str, str], str] = {}
+    monkeypatch.setattr("keyring.get_password", lambda service, key: passwords.get((service, key)))
+    monkeypatch.setattr(
+        "keyring.set_password",
+        lambda service, key, value: passwords.__setitem__((service, key), value),
+    )
 
 
 def recording_link(delivery_id: str, name: str, *, host: str = PANOPTO_HOST) -> str:

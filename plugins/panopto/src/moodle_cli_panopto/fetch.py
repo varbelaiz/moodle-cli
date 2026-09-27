@@ -8,18 +8,21 @@ once per recording.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import typer
+
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
 from moodle_cli.downloads import sanitize
 from moodle_cli.models import Course
 from moodle_cli.session import open_client
-from moodle_cli_panopto import lti, panopto_api, srt
+from moodle_cli_panopto import device_trust, lti, panopto_api, srt
 from moodle_cli_panopto.errors import PanoptoError
 from moodle_cli_panopto.moodle_login import MoodleWebSession, login
 from moodle_cli_panopto.recordings import Recording, list_recordings, resolve_session
@@ -43,6 +46,9 @@ def open_context() -> Iterator[RunContext]:
     none of what it needs (the recordings block, the LTI launch), so
     ``MOODLE_USER``/``MOODLE_PASS`` are required up front, not discovered partway
     through a call.
+
+    The MFA code is asked for only when stdin is a terminal: under the MCP server,
+    stdin is the protocol stream itself.
     """
     config = load_config()
     if not (config.username and config.password):
@@ -51,11 +57,28 @@ def open_context() -> Iterator[RunContext]:
             "cannot reach the Panopto integration"
         )
     with open_client() as ws:
-        moodle = login(config.base_url, config.username, config.password)
+        moodle = login(
+            config.base_url,
+            config.username,
+            config.password,
+            trusted_device=device_trust.load(config.keyring_key),
+            ask_code=_ask_code if sys.stdin.isatty() else None,
+        )
+        if moodle.trusted_device is not None:
+            device_trust.save(config.keyring_key, moodle.trusted_device)
         try:
             yield RunContext(ws=ws, moodle=moodle)
         finally:
             moodle.client.close()
+
+
+def _ask_code() -> str:
+    """Prompt on stderr, so ``panopto get`` redirected to a file stays pure markdown.
+
+    The campus emails a code only when none is pending, so the one to enter can be an
+    earlier email's.
+    """
+    return str(typer.prompt("Verification code from your campus email (the latest one)", err=True))
 
 
 @dataclass(frozen=True)
