@@ -2,7 +2,7 @@
 
 import importlib.metadata
 
-from moodle_cli.errors import AuthError, DownloadError, MoodleAPIError, MoodleError
+from moodle_cli.errors import AuthError, ConfigError, DownloadError, MoodleAPIError, MoodleError
 from moodle_cli.plugins import API_VERSION, CORE_DISTRIBUTION, Plugin
 from moodle_cli.session import open_client
 
@@ -17,6 +17,7 @@ except ModuleNotFoundError:
 __all__ = [
     "API_VERSION",
     "AuthError",
+    "ConfigError",
     "DownloadError",
     "MoodleAPIError",
     "MoodleError",
