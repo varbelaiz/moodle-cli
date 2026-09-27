@@ -62,6 +62,33 @@ def test_list_recordings_raises_when_the_block_reports_an_error() -> None:
     session.client.close()
 
 
+def test_list_recordings_names_mfa_when_moodle_rejects_the_call_as_a_redirect() -> None:
+    session = _session()
+    with respx.mock:
+        respx.post(AJAX_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={"error": "Detected redirect", "errorcode": "redirecterrordetected"},
+            )
+        )
+        with pytest.raises(PanoptoError, match="multi-factor authentication"):
+            list_recordings(session, 29272)
+    session.client.close()
+
+
+def test_list_recordings_reports_the_errorcode_of_a_request_level_error() -> None:
+    session = _session()
+    with respx.mock:
+        respx.post(AJAX_URL).mock(
+            return_value=httpx.Response(
+                200, json={"error": "Invalid sesskey", "errorcode": "invalidsesskey"}
+            )
+        )
+        with pytest.raises(PanoptoError, match=r"\[invalidsesskey\]"):
+            list_recordings(session, 29272)
+    session.client.close()
+
+
 def test_list_recordings_wraps_an_http_error_as_panopto_error() -> None:
     """A session-expired 403 (or any non-2xx) must never escape as a raw httpx error."""
     session = _session()
