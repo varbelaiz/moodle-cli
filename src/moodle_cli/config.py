@@ -12,6 +12,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from moodle_cli.errors import ConfigError
+
 MOBILE_SERVICE = "moodle_mobile_app"
 KEYRING_SERVICE = "moodle-cli"
 
@@ -69,7 +71,7 @@ def load_config(base_url: str | None = None) -> Config:
     ensure_env_loaded()
     url = base_url or os.environ.get("MOODLE_URL")
     if not url:
-        raise ValueError(
+        raise ConfigError(
             "No campus URL configured. Set MOODLE_URL in the environment or a .env file."
         )
     return Config(
