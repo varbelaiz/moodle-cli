@@ -18,6 +18,13 @@ course's Panopto "External tool" activity. This plugin logs in with a cookie the
 way a browser tab does, then replays that LTI launch to establish its own session with
 Panopto — a `MOODLE_TOKEN` alone cannot do either.
 
+**Multi-factor authentication.** When the campus asks for an emailed verification code
+after the password, a `moodle panopto` command run in a terminal prompts for it and asks
+the campus to trust this device. The trust cookie the campus issues is kept in the
+keyring, so later runs — the MCP tools included — skip the code until the campus's
+trust period ends. The MCP tools cannot prompt: until a terminal run has trusted the
+device, they fail with an error saying so.
+
 "Polishing" a transcript means mechanical formatting only: consecutive captions are
 grouped into paragraphs on a pause of 2 seconds or more, each marked with a
 `**HH:MM:SS**` timestamp. The transcribed text itself is never reworded.
