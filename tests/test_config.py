@@ -10,13 +10,20 @@ from pathlib import Path
 
 import pytest
 
-from moodle_cli.config import _config_dir, _settings_path, load_config, save_url, saved_url
+from moodle_cli.config import (
+    _config_dir,
+    _settings_path,
+    load_config,
+    save_login,
+    saved_url,
+    saved_username,
+)
 from moodle_cli.errors import ConfigError
 from tests.conftest import BASE_URL
 
 
 def test_moodle_url_overrides_the_saved_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    save_url("https://saved.example.edu")
+    save_login("https://saved.example.edu", "jdoe")
     monkeypatch.setenv("MOODLE_URL", BASE_URL)
 
     assert load_config().base_url == BASE_URL
@@ -24,13 +31,13 @@ def test_moodle_url_overrides_the_saved_url(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_saved_url_is_used_when_moodle_url_is_unset(tmp_cwd: Path) -> None:
     """A directory with no .env anywhere above it still reaches the saved campus."""
-    save_url(BASE_URL)
+    save_login(BASE_URL, "jdoe")
 
     assert load_config().base_url == BASE_URL
 
 
 def test_explicit_base_url_overrides_every_other_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    save_url("https://saved.example.edu")
+    save_login("https://saved.example.edu", "jdoe")
     monkeypatch.setenv("MOODLE_URL", "https://env.example.edu")
 
     assert load_config(base_url=f"{BASE_URL}/").base_url == BASE_URL
@@ -47,6 +54,14 @@ def test_malformed_settings_file_counts_as_no_saved_url() -> None:
     path.write_text("not json", encoding="utf-8")
 
     assert saved_url() is None
+
+
+def test_saved_username_belongs_to_the_saved_campus_only() -> None:
+    """A MOODLE_URL pointing at another campus must not borrow this campus's username."""
+    save_login(BASE_URL, "jdoe")
+
+    assert saved_username(BASE_URL) == "jdoe"
+    assert saved_username("https://other.example.edu") is None
 
 
 @pytest.mark.parametrize(

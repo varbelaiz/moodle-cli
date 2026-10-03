@@ -10,8 +10,8 @@ import httpx
 import pytest
 import respx
 
-from moodle_cli.auth import TokenStore, mint_token, resolve_token
-from moodle_cli.config import Config
+from moodle_cli.auth import TokenStore, mint_token, resolve_token, web_credentials
+from moodle_cli.config import Config, save_login
 from moodle_cli.errors import AuthError, UnreachableError
 from tests.conftest import BASE_URL, TOKEN_URL
 
@@ -111,3 +111,26 @@ def test_resolve_token_reports_missing_credentials() -> None:
     config = Config(base_url=BASE_URL, username="user")
     with pytest.raises(AuthError, match="MOODLE_USER"):
         resolve_token(config, store=FakeStore())
+
+
+def test_web_credentials_fall_back_to_what_login_stored() -> None:
+    save_login(BASE_URL, "jdoe")
+    store = FakeStore({BASE_URL: "stored-pass"})
+
+    assert web_credentials(Config(base_url=BASE_URL), store=store) == ("jdoe", "stored-pass")
+
+
+def test_web_credentials_prefer_the_environment_over_what_login_stored() -> None:
+    save_login(BASE_URL, "jdoe")
+    store = FakeStore({BASE_URL: "stored-pass"})
+    config = Config(base_url=BASE_URL, username="other", password="env-pass")
+
+    assert web_credentials(config, store=store) == ("other", "env-pass")
+
+
+def test_web_credentials_without_a_keyring_point_at_auth_login() -> None:
+    """A keyring backend that is missing reads as empty, leaving the environment as the only
+    source."""
+    save_login(BASE_URL, "jdoe")
+    with pytest.raises(AuthError, match="auth login"):
+        web_credentials(Config(base_url=BASE_URL), store=FakeStore())

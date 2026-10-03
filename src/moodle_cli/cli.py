@@ -19,7 +19,7 @@ from rich.table import Table
 from moodle_cli import __version__ as __version__
 from moodle_cli.auth import TokenStore, mint_token
 from moodle_cli.client import MoodleClient
-from moodle_cli.config import load_config, save_url
+from moodle_cli.config import load_config, save_login
 from moodle_cli.downloads import (
     DownloadResult,
     DownloadStatus,
@@ -217,7 +217,7 @@ def auth_login(
         info = client.get_site_info()
     # Saved only once the campus has answered, so a mistyped URL is never persisted, and
     # on every login, so the saved URL always names the campus the stored token is for.
-    save_url(config.base_url)
+    save_login(config.base_url, user)
 
     console.print(f"[green]Logged in[/green] as {info.fullname} (id {info.userid})")
     console.print(f"  site: {info.sitename}  ({info.release})")
