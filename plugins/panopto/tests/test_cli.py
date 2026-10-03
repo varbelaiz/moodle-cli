@@ -21,7 +21,9 @@ def _course() -> Course:
 
 
 def _recording(delivery_id: str = "aaa", name: str = "Clase 1") -> Recording:
-    return Recording(id=delivery_id, name=name, host="campus.hosted.panopto.com")
+    return Recording(
+        id=delivery_id, name=name, host="campus.hosted.panopto.com", instance="campusMoodle"
+    )
 
 
 # -- list --------------------------------------------------------------------------

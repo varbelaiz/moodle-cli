@@ -12,6 +12,7 @@ import pytest
 BASE_URL = "https://campus.example.edu"
 PANOPTO_HOST = "campus.hosted.panopto.com"
 PANOPTO_URL = f"https://{PANOPTO_HOST}"
+PANOPTO_INSTANCE = "campusMoodle"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -63,9 +64,7 @@ def isolated_env(
 
 def recording_link(delivery_id: str, name: str, *, host: str = PANOPTO_HOST) -> str:
     """One `block_panopto_get_content`-style anchor, the shape recordings.py parses."""
-    return (
-        f"<a href='https://{host}/Panopto/Pages/Viewer.aspx?id={delivery_id}&instance=x'>{name}</a>"
-    )
+    return f"<a href='https://{host}/Panopto/Pages/Viewer.aspx?id={delivery_id}&instance={PANOPTO_INSTANCE}'>{name}</a>"
 
 
 def recordings_fragment(*links: str) -> str:
