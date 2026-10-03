@@ -33,8 +33,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
-    """Keep the developer's real .env and keyring out of the unit tests.
+def isolated_env(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Keep the developer's real .env, saved settings and keyring out of the unit tests.
 
     Every non-live test here fakes its own client/session rather than resolving real
     credentials, but this stays as a safety net against a future test that forgets to.
@@ -43,6 +47,8 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
     """
     if "live" in request.keywords:
         return
+    config_dir = tmp_path_factory.mktemp("config")
+    monkeypatch.setattr("moodle_cli.config._config_dir", lambda: config_dir)
     monkeypatch.setattr("moodle_cli.config._find_dotenv", lambda: None)
     monkeypatch.setattr("moodle_cli.config._ENV_LOADED", False)
     for var in ("MOODLE_URL", "MOODLE_USER", "MOODLE_PASS", "MOODLE_TOKEN"):

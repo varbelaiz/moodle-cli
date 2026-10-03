@@ -31,6 +31,9 @@ from moodle_cli_panopto.moodle_login import MoodleWebSession
 from moodle_cli_panopto.recordings import Recording
 
 from conftest import BASE_URL, PANOPTO_URL, recording_link, recordings_fragment
+from moodle_cli.auth import TokenStore
+from moodle_cli.config import WEB_PASSWORD_SERVICE, save_login
+from moodle_cli.errors import AuthError
 from moodle_cli.models import Course, Module, Section
 
 AJAX_URL = f"{BASE_URL}/lib/ajax/service.php"
@@ -85,7 +88,7 @@ def _reset_cache() -> Iterator[None]:
 
 @pytest.fixture
 def credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`open_context` requires MOODLE_USER/MOODLE_PASS even though login() itself is faked."""
+    """`open_context` requires web credentials even though login() itself is faked."""
     monkeypatch.setenv("MOODLE_URL", BASE_URL)
     monkeypatch.setenv("MOODLE_USER", "ana")
     monkeypatch.setenv("MOODLE_PASS", "hunter2")
@@ -183,6 +186,55 @@ def test_open_context_asks_for_an_mfa_code_only_when_stdin_is_a_terminal(
         pass
 
     assert (seen["ask_code"] is not None) == asks
+
+
+def _record_login_credentials(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    seen: dict[str, str] = {}
+
+    def fake_login(base_url: str, username: str, password: str, **kwargs: Any) -> MoodleWebSession:
+        seen.update(username=username, password=password)
+        return MoodleWebSession(client=httpx.Client(base_url=BASE_URL), sesskey="sess-1")
+
+    monkeypatch.setattr(fetch_module, "open_client", lambda: FakeWsClient([], _course()))
+    monkeypatch.setattr(fetch_module, "login", fake_login)
+    return seen
+
+
+def test_open_context_logs_in_with_what_auth_login_stored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOODLE_URL", BASE_URL)
+    save_login(BASE_URL, "ana")
+    TokenStore(WEB_PASSWORD_SERVICE).set(BASE_URL, "stored-pass")
+    seen = _record_login_credentials(monkeypatch)
+
+    with fetch_module.open_context():
+        pass
+
+    assert seen == {"username": "ana", "password": "stored-pass"}
+
+
+def test_open_context_prefers_the_environment_over_what_auth_login_stored(
+    monkeypatch: pytest.MonkeyPatch, credentials: None
+) -> None:
+    save_login(BASE_URL, "someone-else")
+    TokenStore(WEB_PASSWORD_SERVICE).set(BASE_URL, "stored-pass")
+    seen = _record_login_credentials(monkeypatch)
+
+    with fetch_module.open_context():
+        pass
+
+    assert seen == {"username": "ana", "password": "hunter2"}
+
+
+def test_open_context_without_credentials_points_at_auth_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOODLE_URL", BASE_URL)
+    _record_login_credentials(monkeypatch)
+
+    with pytest.raises(AuthError, match="auth login"), fetch_module.open_context():
+        pass
 
 
 # -- list_course_recordings -------------------------------------------------------------
