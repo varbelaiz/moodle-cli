@@ -13,7 +13,7 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from moodle_cli.cli import app
-from moodle_cli.config import save_url, saved_url
+from moodle_cli.config import save_login, saved_url
 from moodle_cli.models import epoch_to_datetime
 from tests.conftest import BASE_URL, REST_URL, TOKEN_URL, route_by_function
 
@@ -472,7 +472,7 @@ def test_login_saves_the_url_whatever_its_source(
     logged_out: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The saved URL has to name the campus the freshly stored token belongs to."""
-    save_url("https://old.example.edu")
+    save_login("https://old.example.edu", "jdoe")
     monkeypatch.setenv("MOODLE_URL", BASE_URL)
     _mock_login({"token": "minted"}, SITE_INFO)
 
@@ -483,7 +483,7 @@ def test_login_saves_the_url_whatever_its_source(
 
 
 def test_logout_keeps_the_saved_url(logged_out: dict[str, str]) -> None:
-    save_url(BASE_URL)
+    save_login(BASE_URL, "jdoe")
     logged_out[BASE_URL] = "stored"
 
     result = runner.invoke(app, ["auth", "logout"])

@@ -1,7 +1,8 @@
 """Configuration and credential resolution.
 
-Credentials come from the environment (optionally seeded by a .env file). The password is
-only ever needed to mint a token; once one is stored in the keyring it can be removed.
+Credentials come from the environment (optionally seeded by a .env file), which overrides
+what `auth login` stored: the token and the web password in the keyring, the username
+beside the campus URL.
 
 The campus URL can also be saved to a per-user file, so a tool installed on the PATH -- or
 an MCP server launched from an arbitrary directory -- reaches the same campus the keyring
@@ -22,6 +23,9 @@ from moodle_cli.errors import ConfigError
 
 MOBILE_SERVICE = "moodle_mobile_app"
 KEYRING_SERVICE = "moodle-cli"
+#: The web password lives under a service of its own, so the token and the password for
+#: one campus share a key without overwriting each other.
+WEB_PASSWORD_SERVICE = "moodle-cli-web"
 
 _ENV_LOADED = False
 
@@ -88,28 +92,48 @@ def _settings_path() -> Path:
     return _config_dir() / "config.json"
 
 
-def saved_url() -> str | None:
-    """The campus URL saved by `save_url`, or None when there is none to read.
+def _saved_settings() -> dict[str, object]:
+    """The settings saved by `save_login`; an unreadable or malformed file counts as none.
 
-    An unreadable or malformed file counts as none: the resulting error points at
-    `auth login`, which writes the file afresh.
+    The resulting error points at `auth login`, which writes the file afresh.
     """
     try:
         settings = json.loads(_settings_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    url = settings.get("url") if isinstance(settings, dict) else None
+        return {}
+    return settings if isinstance(settings, dict) else {}
+
+
+def saved_url() -> str | None:
+    """The campus URL saved by `save_login`, or None when there is none to read."""
+    url = _saved_settings().get("url")
     return url if isinstance(url, str) and url else None
 
 
-def save_url(url: str) -> None:
-    """Persist the campus URL for every later run, from any directory."""
+def saved_username(base_url: str) -> str | None:
+    """The username saved by `save_login` for BASE_URL, or None.
+
+    Bound to the saved URL so a MOODLE_URL pointing elsewhere never borrows the username
+    of another campus.
+    """
+    settings = _saved_settings()
+    username = settings.get("username")
+    if settings.get("url") != base_url or not isinstance(username, str) or not username:
+        return None
+    return username
+
+
+def save_login(url: str, username: str) -> None:
+    """Persist the campus URL and username for every later run, from any directory.
+
+    The username is not a secret; the password it goes with is kept in the keyring.
+    """
     path = _settings_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"url": url}), encoding="utf-8")
+        path.write_text(json.dumps({"url": url, "username": username}), encoding="utf-8")
     except OSError as exc:
-        raise ConfigError(f"Could not save the campus URL to {path}: {exc}") from exc
+        raise ConfigError(f"Could not save the campus settings to {path}: {exc}") from exc
 
 
 def load_config(base_url: str | None = None) -> Config:

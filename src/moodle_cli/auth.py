@@ -11,7 +11,13 @@ import keyring
 from keyring.errors import KeyringError
 
 from moodle_cli.client import reaching
-from moodle_cli.config import KEYRING_SERVICE, MOBILE_SERVICE, Config
+from moodle_cli.config import (
+    KEYRING_SERVICE,
+    MOBILE_SERVICE,
+    WEB_PASSWORD_SERVICE,
+    Config,
+    saved_username,
+)
 from moodle_cli.errors import AuthError
 
 
@@ -104,3 +110,21 @@ def resolve_token(
     token = mint_token(config.base_url, config.username, config.password)
     store.set(config.keyring_key, token)
     return token
+
+
+def web_credentials(config: Config, *, store: TokenStore | None = None) -> tuple[str, str]:
+    """The username and password for a browser-style login, which a token cannot replace.
+
+    Each comes from the environment first, then from what `auth login` stored, the same
+    explicit-override rule `resolve_token` applies to ``MOODLE_TOKEN``.
+    """
+    username = config.username or saved_username(config.base_url)
+    password = config.password or (store or TokenStore(WEB_PASSWORD_SERVICE)).get(
+        config.keyring_key
+    )
+    if not (username and password):
+        raise AuthError(
+            "No stored web credentials. Run `moodle auth login`, or set MOODLE_USER and "
+            "MOODLE_PASS."
+        )
+    return username, password
