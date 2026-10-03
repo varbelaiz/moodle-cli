@@ -28,6 +28,9 @@ class Recording:
     name: str
     host: str
     """The Panopto host this recording is served from, e.g. ``campus.hosted.panopto.com``."""
+    instance: str | None
+    """The name Panopto knows the campus by as an identity provider, from the link's
+    ``instance`` parameter; None when the link carries none."""
 
 
 class _RecordingLinkParser(HTMLParser):
@@ -60,11 +63,17 @@ class _RecordingLinkParser(HTMLParser):
         if tag != "a" or self._current_url is None:
             return
         parsed = urlparse(self._current_url)
-        delivery_id = parse_qs(parsed.query).get("id", [None])[0]
+        query = parse_qs(parsed.query)
+        delivery_id = query.get("id", [None])[0]
         if delivery_id:
             name = " ".join("".join(self._buffer).split())
             self.recordings.append(
-                Recording(id=delivery_id, name=name or delivery_id, host=parsed.netloc)
+                Recording(
+                    id=delivery_id,
+                    name=name or delivery_id,
+                    host=parsed.netloc,
+                    instance=query.get("instance", [None])[0],
+                )
             )
         self._current_url = None
         self._buffer = []

@@ -76,7 +76,9 @@ def _sections_with_panopto_lti(cmid: int = 20) -> list[Section]:
 
 
 def _fake_recording(delivery_id: str, name: str) -> Recording:
-    return Recording(id=delivery_id, name=name, host="campus.hosted.panopto.com")
+    return Recording(
+        id=delivery_id, name=name, host="campus.hosted.panopto.com", instance="campusMoodle"
+    )
 
 
 @pytest.fixture(autouse=True)

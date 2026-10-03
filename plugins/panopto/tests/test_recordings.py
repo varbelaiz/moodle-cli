@@ -14,7 +14,7 @@ from moodle_cli_panopto.recordings import (
     select_sessions,
 )
 
-from conftest import BASE_URL, PANOPTO_HOST, recording_link, recordings_fragment
+from conftest import BASE_URL, PANOPTO_HOST, PANOPTO_INSTANCE, recording_link, recordings_fragment
 
 AJAX_URL = f"{BASE_URL}/lib/ajax/service.php"
 
@@ -40,11 +40,17 @@ def test_list_recordings_parses_the_block_fragment() -> None:
     session.client.close()
 
     assert recordings == [
-        Recording(id="11111111-1111-1111-1111-111111111111", name="Clase 1", host=PANOPTO_HOST),
+        Recording(
+            id="11111111-1111-1111-1111-111111111111",
+            name="Clase 1",
+            host=PANOPTO_HOST,
+            instance=PANOPTO_INSTANCE,
+        ),
         Recording(
             id="22222222-2222-2222-2222-222222222222",
             name="Clase 2 & repaso",
             host=PANOPTO_HOST,
+            instance=PANOPTO_INSTANCE,
         ),
     ]
 
@@ -112,9 +118,13 @@ def test_list_recordings_returns_empty_for_a_course_with_none() -> None:
 # -- resolve_session ---------------------------------------------------------------------
 
 _RECORDINGS = [
-    Recording(id="aaa", name="Clase 1 - Introduccion", host=PANOPTO_HOST),
-    Recording(id="bbb", name="Clase 2 - Backend", host=PANOPTO_HOST),
-    Recording(id="ccc", name="Clase 2 - Backend (repaso)", host=PANOPTO_HOST),
+    Recording(
+        id="aaa", name="Clase 1 - Introduccion", host=PANOPTO_HOST, instance=PANOPTO_INSTANCE
+    ),
+    Recording(id="bbb", name="Clase 2 - Backend", host=PANOPTO_HOST, instance=PANOPTO_INSTANCE),
+    Recording(
+        id="ccc", name="Clase 2 - Backend (repaso)", host=PANOPTO_HOST, instance=PANOPTO_INSTANCE
+    ),
 ]
 
 
