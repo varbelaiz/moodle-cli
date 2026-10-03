@@ -43,7 +43,7 @@ def _first_course_with_recordings() -> tuple[str, list[Recording]] | None:
 def test_list_and_transcribe_a_real_recording(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Round-trips the whole chain: block listing, LTI relay, DeliveryInfo, GenerateSRT.
+    """Round-trips the whole chain: block listing, campus sign-in, DeliveryInfo, GenerateSRT.
 
     Runs from a scratch directory outside the repo -- real transcript content must
     never land in the working tree, live suite included.

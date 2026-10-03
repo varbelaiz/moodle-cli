@@ -1,9 +1,10 @@
 """Cookie-authenticated login against the Moodle campus itself.
 
-Nothing this plugin needs -- the recordings block, the LTI launch that hands off to
-Panopto -- is reachable through the REST web-service surface ``moodle_cli.session``
-builds a client for. Those are internal-AJAX and page-rendering endpoints, gated on a
-``MoodleSession`` cookie and a ``sesskey``, the same as a browser tab.
+Nothing this plugin needs -- the recordings block, the campus endpoint that signs the
+user in to Panopto -- is reachable through the REST web-service surface
+``moodle_cli.session`` builds a client for. Those are internal-AJAX and page-rendering
+endpoints, gated on a ``MoodleSession`` cookie and a ``sesskey``, the same as a browser
+tab.
 """
 
 from __future__ import annotations

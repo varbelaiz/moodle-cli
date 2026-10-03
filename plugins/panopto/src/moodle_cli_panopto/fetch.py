@@ -2,8 +2,8 @@
 
 Each public function opens its own login and WS client for the call it serves.
 ``download_transcripts`` is the one exception, sharing a single Panopto session across
-its whole batch -- establishing one costs a full LTI relay round trip, not worth paying
-once per recording.
+its whole batch -- establishing one costs a sign-in bounce through the campus, not worth
+paying once per recording.
 """
 
 from __future__ import annotations
@@ -23,10 +23,11 @@ from moodle_cli.config import load_config
 from moodle_cli.downloads import sanitize
 from moodle_cli.models import Course
 from moodle_cli.session import open_client
-from moodle_cli_panopto import device_trust, lti, panopto_api, srt
+from moodle_cli_panopto import device_trust, panopto_api, srt
 from moodle_cli_panopto.errors import PanoptoError
 from moodle_cli_panopto.moodle_login import MoodleWebSession, login
 from moodle_cli_panopto.recordings import Recording, list_recordings, resolve_session
+from moodle_cli_panopto.sso import open_panopto_session
 
 
 @dataclass
@@ -34,17 +35,13 @@ class RunContext:
     ws: MoodleClient
     moodle: MoodleWebSession
 
-    @property
-    def base_url(self) -> str:
-        return self.ws.base_url
-
 
 @contextmanager
 def open_context() -> Iterator[RunContext]:
     """Open one WS client plus one Moodle cookie session, scoped to one call.
 
     This plugin cannot run on a bare ``MOODLE_TOKEN``: the web-service token covers
-    none of what it needs (the recordings block, the LTI launch), so the web
+    none of what it needs (the recordings block, the Panopto sign-in), so the web
     credentials are required up front, not discovered partway through a call.
 
     The MFA code is asked for only when stdin is a terminal: under the MCP server,
@@ -106,10 +103,8 @@ def list_course_recordings(course: str) -> tuple[Course, list[Recording]]:
     return resolved, recordings
 
 
-def _transcript_markdown(
-    ctx: RunContext, resolved: Course, recording: Recording, language: int | None
-) -> str:
-    panopto, _host = lti.establish_panopto_session(ctx.moodle, ctx.ws, ctx.base_url, resolved.id)
+def _transcript_markdown(ctx: RunContext, recording: Recording, language: int | None) -> str:
+    panopto = open_panopto_session(ctx.moodle, recording)
     try:
         info = panopto_api.get_delivery_info(panopto, recording.id)
         resolved_language = panopto_api.resolve_language(info, language)
@@ -126,7 +121,7 @@ def get_transcript(course: str, session: str, *, language: int | None = None) ->
         resolved = ctx.ws.resolve_course(course)
         recordings = list_recordings(ctx.moodle, resolved.id)
         recording = resolve_session(recordings, session)
-        markdown = _transcript_markdown(ctx, resolved, recording, language)
+        markdown = _transcript_markdown(ctx, recording, language)
     return TranscriptContent(recording=recording, markdown=markdown)
 
 
@@ -163,7 +158,7 @@ def get_transcript_and_save(
         resolved = ctx.ws.resolve_course(course)
         recordings = list_recordings(ctx.moodle, resolved.id)
         recording = resolve_session(recordings, session)
-        markdown = _transcript_markdown(ctx, resolved, recording, language)
+        markdown = _transcript_markdown(ctx, recording, language)
 
     destination = _destination(resolved, recording, output)
     _write_markdown(destination, markdown)
@@ -233,9 +228,7 @@ def download_transcripts(
         return
 
     with open_context() as ctx:
-        panopto, _host = lti.establish_panopto_session(
-            ctx.moodle, ctx.ws, ctx.base_url, resolved.id
-        )
+        panopto = open_panopto_session(ctx.moodle, to_fetch[0][0])
         try:
             for recording, destination in to_fetch:
                 try:
