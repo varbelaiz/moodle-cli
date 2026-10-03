@@ -5,13 +5,13 @@ a Panopto session's answers, not the client or the session themselves.
 `moodle_cli_anydoc.tests.test_fetch` uses: resolving course contents and logging in
 exercise machinery already tested on its own (`test_moodle_login.py`, core's own
 tests). The HTTP this module is genuinely responsible for -- the recordings ajax call,
-the LTI relay, DeliveryInfo/GenerateSRT -- goes through respx.
+the campus sign-in, DeliveryInfo/GenerateSRT -- goes through respx.
 """
 
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 import pytest
 import respx
-from moodle_cli_panopto import device_trust, lti
+from moodle_cli_panopto import device_trust
 from moodle_cli_panopto import fetch as fetch_module
 from moodle_cli_panopto.fetch import (
     download_transcripts,
@@ -30,15 +30,19 @@ from moodle_cli_panopto.fetch import (
 from moodle_cli_panopto.moodle_login import MoodleWebSession
 from moodle_cli_panopto.recordings import Recording
 
-from conftest import BASE_URL, PANOPTO_URL, recording_link, recordings_fragment
+from conftest import (
+    BASE_URL,
+    PANOPTO_URL,
+    mock_panopto_sign_in,
+    recording_link,
+    recordings_fragment,
+)
 from moodle_cli.auth import TokenStore
 from moodle_cli.config import WEB_PASSWORD_SERVICE, save_login
 from moodle_cli.errors import AuthError
-from moodle_cli.models import Course, Module, Section
+from moodle_cli.models import Course, Section
 
 AJAX_URL = f"{BASE_URL}/lib/ajax/service.php"
-LAUNCH_URL = f"{BASE_URL}/mod/lti/launch.php"
-PANOPTO_ACTION = f"{PANOPTO_URL}/Panopto/lti/lti.aspx"
 DELIVERY_INFO_URL = f"{PANOPTO_URL}/Panopto/Pages/Viewer/DeliveryInfo.aspx"
 GENERATE_SRT_URL = f"{PANOPTO_URL}/Panopto/Pages/Transcription/GenerateSRT.ashx"
 
@@ -70,22 +74,10 @@ def _course() -> Course:
     return Course(id=1, shortname="IOS460", fullname="IOS460")
 
 
-def _sections_with_panopto_lti(cmid: int = 20) -> list[Section]:
-    lti_module = Module(id=cmid, name="Clases Grabadas", modname="lti")
-    return [Section(id=1, name="General", section=0, modules=[lti_module])]
-
-
 def _fake_recording(delivery_id: str, name: str) -> Recording:
     return Recording(
         id=delivery_id, name=name, host="campus.hosted.panopto.com", instance="campusMoodle"
     )
-
-
-@pytest.fixture(autouse=True)
-def _reset_cache() -> Iterator[None]:
-    lti.reset_cache()
-    yield
-    lti.reset_cache()
 
 
 @pytest.fixture
@@ -103,30 +95,24 @@ def tmp_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return resolved
 
 
+def _moodle_session() -> MoodleWebSession:
+    cookies = httpx.Cookies()
+    cookies.set("MoodleSession", "moodle-1", domain="campus.example.edu", path="/")
+    return MoodleWebSession(
+        client=httpx.Client(base_url=BASE_URL, cookies=cookies), sesskey="sess-1"
+    )
+
+
 def _fake_login(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         fetch_module,
         "login",
-        lambda base_url, username, password, **kwargs: MoodleWebSession(
-            client=httpx.Client(base_url=BASE_URL), sesskey="sess-1"
-        ),
+        lambda base_url, username, password, **kwargs: _moodle_session(),
     )
 
 
-def _mock_transcript_chain(
-    *, launch_cmid: int = 20, srt_text: str = "1\n00:00:00,000 --> 00:00:01,000\nHola\n"
-) -> None:
-    respx.get(LAUNCH_URL, params={"id": str(launch_cmid)}).mock(
-        return_value=httpx.Response(
-            200,
-            text=(
-                f'<form name="f" action="{PANOPTO_ACTION}" method="post">'
-                '<input type="hidden" name="oauth_signature" value="sig"/></form>'
-                "<script>document.f.submit();</script>"
-            ),
-        )
-    )
-    respx.post(PANOPTO_ACTION).mock(return_value=httpx.Response(200))
+def _mock_transcript_chain(*, srt_text: str = "1\n00:00:00,000 --> 00:00:01,000\nHola\n") -> None:
+    mock_panopto_sign_in()
     respx.post(DELIVERY_INFO_URL).mock(
         return_value=httpx.Response(200, json={"Delivery": {"AvailableLanguages": [3]}})
     )
@@ -268,7 +254,7 @@ def test_list_course_recordings_never_reaches_a_panopto_host(
 def test_get_transcript_returns_markdown_without_writing_a_file(
     monkeypatch: pytest.MonkeyPatch, credentials: None, tmp_cwd: Path
 ) -> None:
-    ws = FakeWsClient(_sections_with_panopto_lti(), _course())
+    ws = FakeWsClient([], _course())
     monkeypatch.setattr(fetch_module, "open_client", lambda: ws)
     _fake_login(monkeypatch)
     fragment = recordings_fragment(recording_link(DELIVERY_A, "Clase 1"))
@@ -288,7 +274,7 @@ def test_get_transcript_returns_markdown_without_writing_a_file(
 def test_get_transcript_and_save_writes_the_markdown_file(
     monkeypatch: pytest.MonkeyPatch, credentials: None, tmp_cwd: Path
 ) -> None:
-    ws = FakeWsClient(_sections_with_panopto_lti(), _course())
+    ws = FakeWsClient([], _course())
     monkeypatch.setattr(fetch_module, "open_client", lambda: ws)
     _fake_login(monkeypatch)
     fragment = recordings_fragment(recording_link(DELIVERY_A, "Clase 1"))
@@ -359,7 +345,7 @@ def test_download_transcripts_skips_an_existing_file_without_overwrite(
 def test_download_transcripts_overwrite_refetches_an_existing_file(
     monkeypatch: pytest.MonkeyPatch, credentials: None, tmp_cwd: Path
 ) -> None:
-    ws = FakeWsClient(_sections_with_panopto_lti(), resolved := _course())
+    ws = FakeWsClient([], resolved := _course())
     monkeypatch.setattr(fetch_module, "open_client", lambda: ws)
     _fake_login(monkeypatch)
     recording = _fake_recording(DELIVERY_A, "Clase 1")
@@ -378,24 +364,14 @@ def test_download_transcripts_overwrite_refetches_an_existing_file(
 def test_download_transcripts_one_failure_does_not_abort_the_batch(
     monkeypatch: pytest.MonkeyPatch, credentials: None, tmp_cwd: Path
 ) -> None:
-    ws = FakeWsClient(_sections_with_panopto_lti(), resolved := _course())
+    ws = FakeWsClient([], resolved := _course())
     monkeypatch.setattr(fetch_module, "open_client", lambda: ws)
     _fake_login(monkeypatch)
     good = _fake_recording(DELIVERY_A, "Clase buena")
     bad = _fake_recording(DELIVERY_B, "Clase con falla")
 
     with respx.mock:
-        respx.get(LAUNCH_URL, params={"id": "20"}).mock(
-            return_value=httpx.Response(
-                200,
-                text=(
-                    f'<form name="f" action="{PANOPTO_ACTION}" method="post">'
-                    '<input type="hidden" name="oauth_signature" value="sig"/></form>'
-                    "<script>document.f.submit();</script>"
-                ),
-            )
-        )
-        respx.post(PANOPTO_ACTION).mock(return_value=httpx.Response(200))
+        mock_panopto_sign_in()
         respx.post(DELIVERY_INFO_URL).mock(
             return_value=httpx.Response(200, json={"Delivery": {"AvailableLanguages": [3]}})
         )
@@ -418,24 +394,14 @@ def test_download_transcripts_an_http_failure_does_not_abort_the_batch(
     """Not just the empty-SRT case: a genuine transport/status failure on one recording
     (a timeout, a 500) must be wrapped into PanoptoError too, so it is caught by the
     same per-recording except clause instead of aborting every recording after it."""
-    ws = FakeWsClient(_sections_with_panopto_lti(), resolved := _course())
+    ws = FakeWsClient([], resolved := _course())
     monkeypatch.setattr(fetch_module, "open_client", lambda: ws)
     _fake_login(monkeypatch)
     bad = _fake_recording(DELIVERY_A, "Clase con falla de red")
     good = _fake_recording(DELIVERY_B, "Clase buena")
 
     with respx.mock:
-        respx.get(LAUNCH_URL, params={"id": "20"}).mock(
-            return_value=httpx.Response(
-                200,
-                text=(
-                    f'<form name="f" action="{PANOPTO_ACTION}" method="post">'
-                    '<input type="hidden" name="oauth_signature" value="sig"/></form>'
-                    "<script>document.f.submit();</script>"
-                ),
-            )
-        )
-        respx.post(PANOPTO_ACTION).mock(return_value=httpx.Response(200))
+        mock_panopto_sign_in()
         # The first recording's DeliveryInfo call 500s; the second succeeds.
         respx.post(DELIVERY_INFO_URL).mock(
             side_effect=[
@@ -457,7 +423,7 @@ def test_get_transcript_and_save_does_not_leave_a_truncated_file_on_a_write_fail
 ) -> None:
     """A crash mid-write must not leave a file at the real destination -- that would be
     silently treated as a completed download and never retried."""
-    ws = FakeWsClient(_sections_with_panopto_lti(), _course())
+    ws = FakeWsClient([], _course())
     monkeypatch.setattr(fetch_module, "open_client", lambda: ws)
     _fake_login(monkeypatch)
     fragment = recordings_fragment(recording_link(DELIVERY_A, "Clase 1"))

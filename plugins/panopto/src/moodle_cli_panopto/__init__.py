@@ -2,8 +2,9 @@
 
 Two capabilities, split by what each is for: `list`/`list_recordings` never leaves
 Moodle (the course's own Panopto block, over internal AJAX); `download`/`get` reach a
-Panopto host for the transcript itself, via a cookie-authenticated Moodle login and an
-LTI-launch relay -- the web-service token this tool otherwise runs on covers none of it.
+Panopto host for the transcript itself, via a cookie-authenticated Moodle login and a
+sign-in to Panopto through the campus -- the web-service token this tool otherwise runs
+on covers none of it.
 """
 
 from __future__ import annotations

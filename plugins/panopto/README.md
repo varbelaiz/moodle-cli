@@ -15,10 +15,11 @@ login every `panopto` command and MCP tool runs with no prompt; `MOODLE_USER` an
 `MOODLE_PASS` override it. The web-service token this tool otherwise runs on covers none
 of what Panopto needs: recordings are listed through the course's own
 Panopto block (an internal Moodle endpoint, not part of the web-service surface), and
-the transcript itself lives on a separate Panopto host reached only through the
-course's Panopto "External tool" activity. This plugin logs in with a cookie the same
-way a browser tab does, then replays that LTI launch to establish its own session with
-Panopto — a `MOODLE_TOKEN` alone cannot do either.
+the transcript itself lives on a separate Panopto host. This plugin logs in with a
+cookie the same way a browser tab does, then signs in to Panopto through the campus, as
+a browser's first visit to a recording does — a `MOODLE_TOKEN` alone cannot do either.
+Any course whose Panopto block lists recordings works, whether or not it also has a
+Panopto "External tool" activity.
 
 **Multi-factor authentication.** When the campus asks for an emailed verification code
 after the password, a `moodle panopto` command run in a terminal prompts for it and asks

@@ -7,7 +7,9 @@ this plugin -- unlike anydoc -- has a live suite of its own.
 
 from __future__ import annotations
 
+import httpx
 import pytest
+import respx
 
 BASE_URL = "https://campus.example.edu"
 PANOPTO_HOST = "campus.hosted.panopto.com"
@@ -111,11 +113,26 @@ def mfa_page_html(sesskey: str = "sessmfa") -> str:
     )
 
 
-def lti_launch_html(action: str, fields: dict[str, str]) -> str:
-    inputs = "".join(
-        f'<input type="hidden" name="{name}" value="{value}"/>' for name, value in fields.items()
-    )
-    return (
-        f'<form name="ltiLaunchForm" action="{action}" method="post">{inputs}</form>'
-        "<script>document.ltiLaunchForm.submit();</script>"
-    )
+def mock_panopto_sign_in(*, accepted: bool = True) -> None:
+    """The campus SSO bounce: Panopto's login page, the campus endpoint, Panopto again.
+
+    The campus endpoint only vouches for a request carrying the Moodle session cookie.
+    """
+    login_url = f"{PANOPTO_URL}/Panopto/Pages/Auth/Login.aspx"
+    sso_url = f"{BASE_URL}/blocks/panopto/SSO.php"
+
+    def panopto_login(request: httpx.Request) -> httpx.Response:
+        if "authCode" not in request.url.params:
+            return httpx.Response(302, headers={"Location": f"{sso_url}?authCode=challenge"})
+        if not accepted:
+            return httpx.Response(200, text="<title>Sign in</title>")
+        return httpx.Response(200, headers={"Set-Cookie": ".ASPXAUTH=signed-in; Path=/"})
+
+    def campus_sso(request: httpx.Request) -> httpx.Response:
+        if "MoodleSession" not in request.headers.get("cookie", ""):
+            return httpx.Response(303, headers={"Location": f"{BASE_URL}/login/index.php"})
+        return httpx.Response(303, headers={"Location": f"{login_url}?authCode=signed"})
+
+    respx.get(login_url).mock(side_effect=panopto_login)
+    respx.get(sso_url).mock(side_effect=campus_sso)
+    respx.get(f"{BASE_URL}/login/index.php").mock(return_value=httpx.Response(200))
