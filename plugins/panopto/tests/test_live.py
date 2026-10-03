@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 from moodle_cli_panopto.errors import PanoptoError
-from moodle_cli_panopto.fetch import get_transcript, list_course_recordings
+from moodle_cli_panopto.fetch import TranscriptContent, get_transcript, list_course_recordings
 from moodle_cli_panopto.recordings import Recording
 
 from moodle_cli.session import open_client
@@ -40,6 +40,19 @@ def _first_course_with_recordings() -> tuple[str, list[Recording]] | None:
     return None
 
 
+def _first_captioned_transcript(
+    course: str, recordings: list[Recording]
+) -> TranscriptContent | None:
+    """Recordings without captions are ordinary, so one is never a failure on its own."""
+    for recording in recordings:
+        try:
+            return get_transcript(course, recording.id)
+        except PanoptoError as exc:
+            if "no captions" not in str(exc):
+                raise
+    return None
+
+
 def test_list_and_transcribe_a_real_recording(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -54,12 +67,12 @@ def test_list_and_transcribe_a_real_recording(
         pytest.skip("no enrolled course currently has a Panopto recording")
     course, recordings = found
 
-    recording = recordings[0]
-    assert recording.id
-    assert recording.name
+    content = _first_captioned_transcript(course, recordings)
+    if content is None:
+        pytest.skip(f"no recording in {course} has captions")
 
-    content = get_transcript(course, recording.id)
-
+    assert content.recording.id
+    assert content.recording.name
     assert content.markdown.strip()
     assert _TIMESTAMP_MARKER.search(content.markdown), "expected at least one **HH:MM:SS** marker"
     assert list(tmp_path.rglob("*")) == [], "get_transcript must not write to disk"
