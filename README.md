@@ -55,8 +55,10 @@ moodle auth login --url https://campus.example.edu
 ```
 
 `auth login` exchanges your password for a long-lived web-service token and stores it in
-the system keyring. The password is prompted for, never taken as an argument, and is not
-needed again afterwards. Once the login succeeds, the campus URL is saved in your user
+the system keyring. The password is prompted for, never taken as an argument, and is kept
+in the keyring too: plugins that log in like a browser, such as Panopto, cannot run on a
+token. That is the account's full web login, broader than the token, so `auth logout`
+deletes both. Once the login succeeds, the campus URL and username are saved in your user
 config directory, so every later command and the MCP server work from any directory.
 
 If your campus uses SSO only and you have no local Moodle password, `login/token.php`
@@ -105,9 +107,9 @@ notes. An installed plugin adds a group of its own; `moodle plugins list` shows 
 
 | CLI | Description |
 | --- | --- |
-| `moodle auth login` | Mint a token, store it in the keyring and save the campus URL. |
-| `moodle auth status` | Show who the stored token belongs to, and what it can do. |
-| `moodle auth logout` | Delete the stored token, keeping the saved campus URL. |
+| `moodle auth login` | Mint a token, store it and the password in the keyring, and save the campus URL. |
+| `moodle auth status` | Show who the stored token belongs to, what it can do, and whether a password is stored. |
+| `moodle auth logout` | Delete the stored token and password, keeping the saved campus URL. |
 
 ### [Updating](docs/updating.md)
 
@@ -178,8 +180,8 @@ notes. An installed plugin adds a group of its own; `moodle plugins list` shows 
 | --- | --- | --- |
 | `MOODLE_URL` | no | Campus base URL, overriding the one saved by `auth login`. |
 | `MOODLE_TOKEN` | no | Use this token directly and skip the keyring. |
-| `MOODLE_USER` | no | Username, so `auth login` does not prompt for it. |
-| `MOODLE_PASS` | no | Password, for minting a token unattended. |
+| `MOODLE_USER` | no | Username, overriding the one saved by `auth login`. |
+| `MOODLE_PASS` | no | Password, overriding the one stored by `auth login`. |
 | `MOODLE_NO_UPDATE_CHECK` | no | Any non-empty value turns off the daily new-release notice. See [Updating](docs/updating.md#update-notice). |
 
 These can be set in the environment or in a `.env` file at the project root; see
@@ -187,8 +189,8 @@ These can be set in the environment or in a `.env` file at the project root; see
 one saved by `auth login`. Token resolution order is `MOODLE_TOKEN`, then the keyring, then
 minting a new one from `MOODLE_USER` and `MOODLE_PASS`.
 
-Storing `MOODLE_PASS` is only needed for unattended use. After `auth login` the token lives
-in the keyring and the password can be removed.
+After `auth login` neither variable is needed: the token and the password live in the
+keyring.
 
 ## Exit codes
 

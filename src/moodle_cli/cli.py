@@ -19,7 +19,7 @@ from rich.table import Table
 from moodle_cli import __version__ as __version__
 from moodle_cli.auth import TokenStore, mint_token
 from moodle_cli.client import MoodleClient
-from moodle_cli.config import load_config, save_login
+from moodle_cli.config import KEYRING_SERVICE, WEB_PASSWORD_SERVICE, load_config, save_login
 from moodle_cli.downloads import (
     DownloadResult,
     DownloadStatus,
@@ -195,10 +195,11 @@ def auth_login(
         str | None, typer.Option("--username", "-u", help="Campus username.")
     ] = None,
 ) -> None:
-    """Mint a web-service token, store it in the system keyring and save the campus URL.
+    """Mint a web-service token, store it and your password in the system keyring.
 
     The password is prompted for and never accepted as an argument, which would leave it in
-    your shell history. Once the token is stored you can remove MOODLE_PASS from .env.
+    your shell history. It is kept for plugins that log in like a browser, which a token
+    cannot do; `auth logout` deletes it. The campus URL and username are saved too.
     """
     try:
         config = load_config(base_url=url)
@@ -218,11 +219,12 @@ def auth_login(
     # Saved only once the campus has answered, so a mistyped URL is never persisted, and
     # on every login, so the saved URL always names the campus the stored token is for.
     save_login(config.base_url, user)
+    TokenStore(WEB_PASSWORD_SERVICE).set(config.keyring_key, password)
 
     console.print(f"[green]Logged in[/green] as {info.fullname} (id {info.userid})")
     console.print(f"  site: {info.sitename}  ({info.release})")
     if stored:
-        console.print("  token stored in the system keyring")
+        console.print("  token and password stored in the system keyring")
     else:
         console.print(
             "[yellow]  no keyring backend available; set MOODLE_TOKEN to reuse this token[/yellow]"
@@ -232,24 +234,33 @@ def auth_login(
 @auth_app.command("status")
 @handle_errors
 def auth_status() -> None:
-    """Show whether a usable token exists, and who it belongs to."""
+    """Show whether a usable token exists, who it belongs to, and whether a password is stored."""
     with open_client(allow_mint=False) as client:
         info = client.get_site_info()
+    password_stored = TokenStore(WEB_PASSWORD_SERVICE).get(load_config().keyring_key) is not None
     console.print(f"[green]Authenticated[/green] as {info.fullname} (id {info.userid})")
     console.print(f"  site: {info.sitename}")
     console.print(f"  functions available: {len(info.function_names)}")
     console.print(f"  file downloads allowed: {info.downloadfiles}")
+    console.print(f"  web password stored: {password_stored}")
 
 
 @auth_app.command("logout")
 @handle_errors
 def auth_logout() -> None:
-    """Delete the stored token from the keyring, keeping the saved campus URL."""
+    """Delete the stored token and password from the keyring, keeping the saved campus URL."""
     config = load_config()
-    if TokenStore().delete(config.keyring_key):
-        console.print("[green]Token deleted from the keyring.[/green]")
+    deleted = [
+        name
+        for name, service in (("token", KEYRING_SERVICE), ("password", WEB_PASSWORD_SERVICE))
+        if TokenStore(service).delete(config.keyring_key)
+    ]
+    if deleted:
+        console.print(
+            f"[green]Deleted the stored {' and '.join(deleted)} from the keyring.[/green]"
+        )
     else:
-        console.print("[yellow]No stored token to delete.[/yellow]")
+        console.print("[yellow]Nothing stored to delete.[/yellow]")
 
 
 # -- courses ---------------------------------------------------------------------

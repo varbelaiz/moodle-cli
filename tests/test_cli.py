@@ -12,8 +12,15 @@ import respx
 from typer.main import get_command
 from typer.testing import CliRunner
 
+from moodle_cli.auth import TokenStore, web_credentials
 from moodle_cli.cli import app
-from moodle_cli.config import save_login, saved_url
+from moodle_cli.config import (
+    KEYRING_SERVICE,
+    WEB_PASSWORD_SERVICE,
+    load_config,
+    save_login,
+    saved_url,
+)
 from moodle_cli.models import epoch_to_datetime
 from tests.conftest import BASE_URL, REST_URL, TOKEN_URL, route_by_function
 
@@ -388,25 +395,29 @@ SITE_INFO = {"sitename": "Example University", "fullname": "Jane Doe", "userid":
 
 
 @pytest.fixture
-def logged_out(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+def logged_out(monkeypatch: pytest.MonkeyPatch) -> dict[tuple[str, str], str]:
     """No campus URL or token in the environment, and an in-memory keyring.
 
     The keyring is replaced so a login under test never writes to the developer's real one.
+    Entries are keyed by (service, key), as the real keyring files them.
     """
     monkeypatch.delenv("MOODLE_URL")
     monkeypatch.delenv("MOODLE_TOKEN")
-    tokens: dict[str, str] = {}
+    secrets: dict[tuple[str, str], str] = {}
 
-    def store(self: object, key: str, token: str) -> bool:
-        tokens[key] = token
+    def store(self: TokenStore, key: str, secret: str) -> bool:
+        secrets[(self.service, key)] = secret
         return True
 
-    monkeypatch.setattr("moodle_cli.auth.TokenStore.get", lambda self, key: tokens.get(key))
+    monkeypatch.setattr(
+        "moodle_cli.auth.TokenStore.get", lambda self, key: secrets.get((self.service, key))
+    )
     monkeypatch.setattr("moodle_cli.auth.TokenStore.set", store)
     monkeypatch.setattr(
-        "moodle_cli.auth.TokenStore.delete", lambda self, key: tokens.pop(key, None) is not None
+        "moodle_cli.auth.TokenStore.delete",
+        lambda self, key: secrets.pop((self.service, key), None) is not None,
     )
-    return tokens
+    return secrets
 
 
 def _mock_login(token_body: dict[str, Any], site_info: dict[str, Any]) -> None:
@@ -416,7 +427,7 @@ def _mock_login(token_body: dict[str, Any], site_info: dict[str, Any]) -> None:
 
 @respx.mock
 def test_login_saves_the_url_so_later_commands_need_no_moodle_url(
-    logged_out: dict[str, str],
+    logged_out: dict[tuple[str, str], str],
 ) -> None:
     _mock_login({"token": "minted"}, SITE_INFO)
 
@@ -444,7 +455,7 @@ def test_login_saves_the_url_so_later_commands_need_no_moodle_url(
     ids=["mint-fails", "verification-fails"],
 )
 def test_login_persists_the_url_only_after_a_successful_verification(
-    logged_out: dict[str, str], token_body: dict[str, Any], site_info: dict[str, Any]
+    logged_out: dict[tuple[str, str], str], token_body: dict[str, Any], site_info: dict[str, Any]
 ) -> None:
     _mock_login(token_body, site_info)
 
@@ -457,7 +468,9 @@ def test_login_persists_the_url_only_after_a_successful_verification(
 
 
 @respx.mock
-def test_login_prompts_for_the_url_when_none_is_configured(logged_out: dict[str, str]) -> None:
+def test_login_prompts_for_the_url_when_none_is_configured(
+    logged_out: dict[tuple[str, str], str],
+) -> None:
     _mock_login({"token": "minted"}, SITE_INFO)
 
     result = runner.invoke(app, ["auth", "login"], input=f"{BASE_URL}\njdoe\nsecret\n")
@@ -469,7 +482,7 @@ def test_login_prompts_for_the_url_when_none_is_configured(logged_out: dict[str,
 
 @respx.mock
 def test_login_saves_the_url_whatever_its_source(
-    logged_out: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    logged_out: dict[tuple[str, str], str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The saved URL has to name the campus the freshly stored token belongs to."""
     save_login("https://old.example.edu", "jdoe")
@@ -482,15 +495,43 @@ def test_login_saves_the_url_whatever_its_source(
     assert saved_url() == BASE_URL
 
 
-def test_logout_keeps_the_saved_url(logged_out: dict[str, str]) -> None:
+def test_logout_deletes_the_token_and_password_and_keeps_the_saved_url(
+    logged_out: dict[tuple[str, str], str],
+) -> None:
     save_login(BASE_URL, "jdoe")
-    logged_out[BASE_URL] = "stored"
+    logged_out[(KEYRING_SERVICE, BASE_URL)] = "stored"
+    logged_out[(WEB_PASSWORD_SERVICE, BASE_URL)] = "secret"
 
     result = runner.invoke(app, ["auth", "logout"])
 
     assert result.exit_code == 0, result.output
     assert logged_out == {}
     assert saved_url() == BASE_URL
+
+
+@respx.mock
+def test_login_stores_the_password_and_username_for_web_logins(
+    logged_out: dict[tuple[str, str], str],
+) -> None:
+    _mock_login({"token": "minted"}, SITE_INFO)
+
+    login = runner.invoke(app, ["auth", "login", "--url", BASE_URL, "-u", "jdoe"], input="secret\n")
+    status = runner.invoke(app, ["auth", "status"])
+
+    assert login.exit_code == 0, login.output
+    assert web_credentials(load_config()) == ("jdoe", "secret")
+    assert "web password stored: True" in status.stdout
+
+
+@respx.mock
+def test_login_stores_no_password_the_campus_rejected(
+    logged_out: dict[tuple[str, str], str],
+) -> None:
+    _mock_login({"error": "Invalid login", "errorcode": "invalidlogin"}, SITE_INFO)
+
+    runner.invoke(app, ["auth", "login", "--url", BASE_URL, "-u", "jdoe"], input="wrong\n")
+
+    assert (WEB_PASSWORD_SERVICE, BASE_URL) not in logged_out
 
 
 # -- links, announcements, assignments and grades ---------------------------------
