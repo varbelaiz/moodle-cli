@@ -4,8 +4,9 @@ Skipped unless ``--live`` is passed. Discovers a course with recordings dynamica
 nothing here hardcodes a course, a delivery id, or a language code, since those are
 this campus's own data, not an assumption to encode.
 
-Requires MOODLE_URL plus MOODLE_USER/MOODLE_PASS -- a bare MOODLE_TOKEN cannot reach
-the Panopto integration (see moodle_cli_panopto.fetch.open_context).
+Requires web credentials, stored by `moodle auth login` or in MOODLE_USER/MOODLE_PASS --
+a bare MOODLE_TOKEN cannot reach the Panopto integration (see
+moodle_cli_panopto.fetch.open_context).
 """
 
 from __future__ import annotations

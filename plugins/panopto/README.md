@@ -10,8 +10,10 @@ moodle plugins install panopto
 See [docs/plugins.md](../../docs/plugins.md) in the core repository for how plugins are
 installed and discovered in general.
 
-**Needs `MOODLE_USER`/`MOODLE_PASS`.** The web-service token this tool otherwise runs
-on covers none of what Panopto needs: recordings are listed through the course's own
+**Needs your web password.** `moodle auth login` stores it in the keyring, so after one
+login every `panopto` command and MCP tool runs with no prompt; `MOODLE_USER` and
+`MOODLE_PASS` override it. The web-service token this tool otherwise runs on covers none
+of what Panopto needs: recordings are listed through the course's own
 Panopto block (an internal Moodle endpoint, not part of the web-service surface), and
 the transcript itself lives on a separate Panopto host reached only through the
 course's Panopto "External tool" activity. This plugin logs in with a cookie the same

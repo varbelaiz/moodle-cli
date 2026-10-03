@@ -17,6 +17,7 @@ from typing import Literal
 
 import typer
 
+from moodle_cli.auth import web_credentials
 from moodle_cli.client import MoodleClient
 from moodle_cli.config import load_config
 from moodle_cli.downloads import sanitize
@@ -43,24 +44,19 @@ def open_context() -> Iterator[RunContext]:
     """Open one WS client plus one Moodle cookie session, scoped to one call.
 
     This plugin cannot run on a bare ``MOODLE_TOKEN``: the web-service token covers
-    none of what it needs (the recordings block, the LTI launch), so
-    ``MOODLE_USER``/``MOODLE_PASS`` are required up front, not discovered partway
-    through a call.
+    none of what it needs (the recordings block, the LTI launch), so the web
+    credentials are required up front, not discovered partway through a call.
 
     The MFA code is asked for only when stdin is a terminal: under the MCP server,
     stdin is the protocol stream itself.
     """
     config = load_config()
-    if not (config.username and config.password):
-        raise PanoptoError(
-            "panopto needs MOODLE_USER and MOODLE_PASS -- the web-service token alone "
-            "cannot reach the Panopto integration"
-        )
+    username, password = web_credentials(config)
     with open_client() as ws:
         moodle = login(
             config.base_url,
-            config.username,
-            config.password,
+            username,
+            password,
             trusted_device=device_trust.load(config.keyring_key),
             ask_code=_ask_code if sys.stdin.isatty() else None,
         )
