@@ -27,6 +27,7 @@ from moodle_cli.mcp_server import (
     get_course_contents,
     get_grade_summary,
     get_grades,
+    get_quiz_review,
     get_quiz_status,
     get_quizzes,
     list_courses,
@@ -471,6 +472,26 @@ def test_get_quiz_status_reports_attempts_and_grade(
         "grade_to_pass": 4,
         "max_grade": 10,
     }
+
+
+@respx.mock
+def test_get_quiz_review_carries_the_max_marks_and_nulls_for_withheld_parts(
+    quiz_review_attempts_payload: dict[str, Any], quiz_review_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_review_attempts_payload,
+        mod_quiz_get_attempt_review=quiz_review_payload,
+    )
+
+    result = get_quiz_review(42628)
+
+    assert result["marks"] == 1
+    assert result["max_marks"] == 2
+    graded, hidden = result["questions"]
+    assert graded["answers"] == [{"text": "Verdadero", "correct": True, "feedback": None}]
+    assert graded["right_answer"] == "La respuesta correcta es 'Verdadero'"
+    assert hidden["right_answer"] is None
+    assert hidden["feedback"] is None
 
 
 @respx.mock
