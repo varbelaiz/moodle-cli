@@ -103,6 +103,78 @@ Example `get_quiz_status` response — same attempt, renamed fields:
 }
 ```
 
+## Review a finished attempt
+
+CLI: `moodle course quiz-review`
+MCP: `get_quiz_review`
+
+```
+moodle course quiz-review QUIZ_ID [--attempt N] [--json]
+```
+
+MCP parameters: `quiz_id`; `attempt`, optional.
+
+Shows what a finished attempt asked: each question's prompt, the options offered, your
+answer with a per-part verdict, the right answer and the feedback. A choice that has
+feedback of its own carries it on its answer, apart from the question's feedback. `--attempt` takes the
+attempt number from 1 and defaults to the latest finished attempt.
+
+Every question type the campus uses is read into the same shape: true/false and multiple
+choice (one answer per option chosen), short answer (the text typed), matching (one
+`stem -> choice` answer per row), and the two fill-the-gaps types, drop-down and drag and
+drop (the prompt reads with each gap filled in as `[choice]`, one answer per gap).
+
+**The quiz decides what you may see.** Each quiz sets review options for whether an
+answer was right, the right answer and the feedback, and the campus leaves a withheld part
+out of the page entirely. Such a part comes back as `null` and is left out of the CLI
+output; it is never reported as an empty answer. A quiz that allows no review at all is
+an error (`noreview`), not an empty review.
+
+`marks` is the attempt's raw score out of `max_marks`, the sum of each question's
+`max_mark`; it is not rescaled to the quiz's grade the way `quiz-status` reports it.
+
+Example `--json` response, and the `get_quiz_review` response alike:
+
+```json
+{
+  "quiz_id": 3305,
+  "attempt_id": 90211,
+  "attempt": 1,
+  "marks": 1.0,
+  "timefinish": 1708473000,
+  "questions": [
+    {
+      "number": "1",
+      "type": "truefalse",
+      "state": "gradedright",
+      "mark": 1.0,
+      "max_mark": 1.0,
+      "prompt": "Is a for loop guaranteed to run at least once?",
+      "choices": ["True", "False"],
+      "answers": [{"text": "False", "correct": true, "feedback": null}],
+      "right_answer": "The correct answer is 'False'.",
+      "feedback": null,
+      "general_feedback": "A do-while loop is the one that always runs once."
+    }
+  ],
+  "max_marks": 1.0
+}
+```
+
+## Export every quiz of a course
+
+CLI: `moodle course quiz-export`
+
+```
+moodle course quiz-export COURSE [-o DIR]
+```
+
+Writes the latest finished attempt of each quiz in the course as one markdown file, the
+same text `quiz-review` prints, under `./<shortname>/Quizzes/` by default. A quiz with no
+finished attempt, or one that allows no review, is listed as skipped with the reason
+rather than dropped. Two quizzes sharing a name get the quiz id appended so neither
+overwrites the other.
+
 **Assignments and quizzes are separate Moodle activity types**, read through entirely
 different web-service functions. An "Attempt quiz now" button is a quiz, not an
 assignment — it won't appear in the assignments commands, and vice versa.
