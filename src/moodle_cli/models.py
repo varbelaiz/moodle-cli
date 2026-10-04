@@ -322,6 +322,39 @@ class QuizStatus(_Base):
     max_grade: float | None = None
 
 
+class ReviewAnswer(_Base):
+    """One part of a student's response to a reviewed question."""
+
+    text: str
+    #: Moodle's verdict on this part; ``None`` when the quiz's review options hide it.
+    correct: bool | None = None
+    #: Feedback written for this choice alone, shown only for a choice the student made.
+    feedback: str | None = None
+
+
+class ReviewQuestion(_Base):
+    """One question of a finished attempt, as its review page shows it.
+
+    Every optional field is ``None`` when the quiz's review options withhold it, which is
+    distinct from an empty value: Moodle leaves a hidden part out of the page entirely.
+    """
+
+    #: Moodle's own numbering; ``"i"`` for an information item, which is not a question.
+    number: str
+    type: str
+    #: ``gradedright``, ``gradedwrong``, ``gradedpartial``...; ``None`` when hidden.
+    state: str | None = None
+    mark: float | None = None
+    max_mark: float = 0
+    prompt: str = ""
+    #: The options offered, for types that offer any; empty for free-text types.
+    choices: list[str] = Field(default_factory=list)
+    answers: list[ReviewAnswer] = Field(default_factory=list)
+    right_answer: str | None = None
+    feedback: str | None = None
+    general_feedback: str | None = None
+
+
 class CourseGrade(_Base):
     courseid: int
     grade: _Text = ""
