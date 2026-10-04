@@ -477,6 +477,24 @@ def get_quiz_status(quiz_id: int, course: str | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_quiz_review(quiz_id: int, attempt: int | None = None) -> dict[str, Any]:
+    """The questions of one finished quiz attempt, with the answers given and the feedback.
+
+    `quiz_id` is the `id` from get_quizzes. `attempt` is the attempt number from 1; omit
+    it for the latest finished attempt. Each question carries its `prompt`, the `choices`
+    offered (empty for free-text types), the `answers` given with a per-part `correct`
+    verdict, the `right_answer` and the `feedback`.
+
+    The quiz's review options decide what is shown: a withheld part comes back as null,
+    never as an empty answer, and a quiz that allows no review at all is an error.
+    """
+    client = open_client()
+    with client:
+        review = client.get_quiz_review(quiz_id, attempt)
+    return review.model_dump(mode="json")
+
+
+@mcp.tool()
 def get_grade_summary() -> list[dict[str, Any]]:
     """Course-level grade summary across every enrolled course.
 
