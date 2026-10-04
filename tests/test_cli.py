@@ -899,6 +899,45 @@ def test_quiz_review_json_reports_a_withheld_part_as_null(
 
 
 @respx.mock
+def test_quiz_export_writes_one_file_per_quiz_and_lists_unreviewable_ones_as_skipped(
+    tmp_path: Path,
+    courses_payload: dict[str, Any],
+    quizzes_payload: dict[str, Any],
+    quiz_review_attempts_payload: dict[str, Any],
+    quiz_review_payload: dict[str, Any],
+) -> None:
+    template = quizzes_payload["quizzes"][0]
+    quizzes_payload["quizzes"] = [
+        {**template, "id": 1, "name": "Repaso"},
+        {**template, "id": 2, "name": "Repaso"},
+        {**template, "id": 3, "name": "Cerrado"},
+    ]
+
+    def attempts(body: str) -> dict[str, Any]:
+        if "quizid=3" in body:
+            return {"attempts": [], "warnings": []}
+        return quiz_review_attempts_payload
+
+    route_by_function(
+        core_course_get_enrolled_courses_by_timeline_classification=courses_payload,
+        mod_quiz_get_quizzes_by_courses=quizzes_payload,
+        mod_quiz_get_user_attempts=attempts,
+        mod_quiz_get_attempt_review=quiz_review_payload,
+    )
+
+    result = runner.invoke(app, ["course", "quiz-export", "IOS460", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["Repaso (1).md", "Repaso (2).md"]
+    assert (
+        (tmp_path / "Repaso (1).md").read_text(encoding="utf-8").startswith("# Repaso, attempt 2")
+    )
+    assert "skip" in result.output
+    assert "Cerrado" in result.output
+    assert "no finished attempt" in result.output
+
+
+@respx.mock
 def test_quiz_status_reports_no_attempts_before_the_quiz_is_taken() -> None:
     route_by_function(
         mod_quiz_get_user_attempts={"attempts": [], "warnings": []},
@@ -1117,6 +1156,7 @@ CORE_COMMANDS_WITHOUT_JSON = {
     ("auth", "status"),
     ("auth", "logout"),
     ("course", "download"),
+    ("course", "quiz-export"),
 }
 
 CORE_GROUPS = ("auth", "courses", "course", "plugins")

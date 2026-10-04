@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import textwrap
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from enum import StrEnum
 from pathlib import Path
@@ -33,7 +34,7 @@ from moodle_cli.downloads import (
     plan_link_downloads,
     sanitize,
 )
-from moodle_cli.errors import ConfigError, MoodleError
+from moodle_cli.errors import ConfigError, MoodleError, UnreachableError
 from moodle_cli.models import (
     Announcement,
     Assignment,
@@ -978,6 +979,46 @@ def course_quiz_review(
         return
     title = f"Quiz {review.quiz_id}, attempt {review.attempt}"
     console.print(_review_markdown(review, title), highlight=False, soft_wrap=True, markup=False)
+
+
+@course_app.command("quiz-export")
+@handle_errors
+def course_quiz_export(
+    course: CourseArg,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output", "-o", help="Destination directory. Default: ./<shortname>/Quizzes/"
+        ),
+    ] = None,
+) -> None:
+    """Write the latest finished attempt of every quiz in a course as one markdown file each.
+
+    A quiz with no finished attempt, or whose review options allow no review, is listed as
+    skipped with the reason.
+    """
+    with open_client() as client:
+        resolved = client.resolve_course(course)
+        quizzes = client.get_quizzes([resolved.id])
+        root = output or Path(sanitize(resolved.shortname)) / "Quizzes"
+        names = Counter(sanitize(q.name) for q in quizzes)
+        for quiz in quizzes:
+            label = escape(quiz.name)
+            try:
+                review = client.get_quiz_review(quiz.id)
+            except UnreachableError:
+                raise
+            except MoodleError as exc:
+                console.print(f"[dim]skip[/dim]    {label}: {escape(str(exc))}")
+                continue
+            stem = sanitize(quiz.name)
+            # Teachers reuse a quiz's name within a course; the id keeps both files.
+            filename = f"{stem} ({quiz.id}).md" if names[stem] > 1 else f"{stem}.md"
+            destination = root / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            title = f"{quiz.name}, attempt {review.attempt}"
+            destination.write_text(_review_markdown(review, title), encoding="utf-8")
+            console.print(f"[green]ok[/green]      {label} -> {escape(str(destination))}")
 
 
 def _review_markdown(review: QuizReview, title: str) -> str:
