@@ -38,6 +38,8 @@ from moodle_cli.models import (
     Announcement,
     Assignment,
     Participant,
+    QuizReview,
+    ReviewAnswer,
     Section,
     epoch_to_datetime,
 )
@@ -951,6 +953,63 @@ def course_quiz_status(
         # One flag covers never attempted, awaiting manual grading, and graded with the
         # marks hidden by the quiz's review options — so report availability, not grading.
         console.print("grade: not available (not graded yet, or hidden by the quiz)")
+
+
+@course_app.command("quiz-review")
+@handle_errors
+def course_quiz_review(
+    quiz_id: QuizIdArg,
+    attempt: Annotated[
+        int | None,
+        typer.Option("--attempt", help="Attempt number, from 1. Default: the latest finished."),
+    ] = None,
+    as_json: JsonOpt = False,
+) -> None:
+    """Show one finished attempt's questions, your answers, the right answers and feedback.
+
+    What appears is limited by the quiz's review options: a quiz may hide whether answers
+    were right, the right answers or the feedback, and some allow no review at all.
+    """
+    with open_client() as client:
+        review = client.get_quiz_review(quiz_id, attempt)
+
+    if as_json:
+        _emit_json(review.model_dump(mode="json"))
+        return
+    title = f"Quiz {review.quiz_id}, attempt {review.attempt}"
+    console.print(_review_markdown(review, title), highlight=False, soft_wrap=True, markup=False)
+
+
+def _review_markdown(review: QuizReview, title: str) -> str:
+    """A reviewed attempt as markdown, leaving out every part the quiz withheld."""
+    lines = [f"# {title}", ""]
+    if review.marks is not None:
+        lines.append(f"Marks: {review.marks:g} / {review.max_marks:g}")
+    if review.finished_at:
+        lines.append(f"Finished: {review.finished_at:%Y-%m-%d %H:%M}")
+    for question in review.questions:
+        heading = f"## Question {question.number}"
+        if question.mark is not None:
+            heading += f" ({question.mark:g} / {question.max_mark:g})"
+        lines += ["", heading, "", question.prompt]
+        if question.choices:
+            lines += ["", "Choices:", *(f"- {choice}" for choice in question.choices)]
+        lines += ["", "Your answer:"]
+        lines += [f"- {_answer_line(a)}" for a in question.answers] or ["- (no answer)"]
+        for label, value in (
+            ("Right answer", question.right_answer),
+            ("Feedback", question.feedback),
+            ("General feedback", question.general_feedback),
+        ):
+            if value:
+                lines += ["", f"{label}:", value]
+    return "\n".join(lines) + "\n"
+
+
+def _answer_line(answer: ReviewAnswer) -> str:
+    verdict = {True: " (correct)", False: " (incorrect)", None: ""}[answer.correct]
+    line = f"{answer.text or '(blank)'}{verdict}"
+    return f"{line}: {answer.feedback}" if answer.feedback else line
 
 
 @course_app.command("grades")
