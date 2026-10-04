@@ -21,10 +21,12 @@ from moodle_cli.models import (
     GradeItem,
     Participant,
     Quiz,
+    QuizReview,
     QuizStatus,
     Section,
     SiteInfo,
 )
+from moodle_cli.quiz_review import parse_question
 
 REST_PATH = "/webservice/rest/server.php"
 
@@ -314,6 +316,36 @@ class MoodleClient:
             grade=grade_body.get("grade"),
             grade_to_pass=grade_body.get("gradetopass"),
             max_grade=self._quiz_max_grade(quiz_id, course_id) if has_grade else None,
+        )
+
+    def get_quiz_review(self, quiz_id: int, attempt: int | None = None) -> QuizReview:
+        """One finished attempt's questions, answers and feedback; the latest by default.
+
+        ``attempt`` is the attempt's ordinal (1 for the first), not its id. What comes back
+        is limited by the quiz's review options, and a quiz that allows no review at all
+        raises :class:`MoodleAPIError` with ``errorcode == "noreview"``.
+        """
+        body = self._call(
+            "mod_quiz_get_user_attempts", quizid=quiz_id, status="finished", includepreviews=0
+        )
+        attempts = body.get("attempts") or []
+        if attempt is not None:
+            attempts = [a for a in attempts if a.get("attempt") == attempt]
+        if not attempts:
+            which = f"attempt {attempt}" if attempt is not None else "finished attempt"
+            raise MoodleError(f"Quiz {quiz_id} has no {which} to review")
+        # Moodle orders attempts ascending, so the last entry is the most recent one.
+        chosen = attempts[-1]
+
+        review = self._call("mod_quiz_get_attempt_review", attemptid=chosen["id"], page=-1)
+        reviewed = review.get("attempt") or {}
+        return QuizReview(
+            quiz_id=quiz_id,
+            attempt_id=chosen["id"],
+            attempt=chosen.get("attempt") or 0,
+            marks=reviewed.get("sumgrades"),
+            timefinish=reviewed.get("timefinish") or 0,
+            questions=[parse_question(q) for q in review.get("questions") or []],
         )
 
     def _quiz_max_grade(self, quiz_id: int, course_id: int | None = None) -> float | None:

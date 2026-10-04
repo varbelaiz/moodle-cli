@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from moodle_cli.client import SORTS, VIEWS, MoodleClient, _flatten_params, check_api_error
 from moodle_cli.errors import MoodleAPIError, MoodleError, UnreachableError
-from tests.conftest import BASE_URL, REST_URL, posted_params
+from tests.conftest import BASE_URL, REST_URL, posted_params, route_by_function
 
 
 @pytest.fixture
@@ -468,6 +468,70 @@ def test_get_quiz_status_handles_no_attempts_yet(client: MoodleClient) -> None:
     assert status.has_grade is False
     assert status.max_grade is None
     assert len(route.calls) == 2
+
+
+@respx.mock
+def test_get_quiz_review_reads_the_latest_finished_attempt_by_default(
+    client: MoodleClient,
+    quiz_review_attempts_payload: dict[str, Any],
+    quiz_review_payload: dict[str, Any],
+) -> None:
+    route = route_by_function(
+        mod_quiz_get_user_attempts=quiz_review_attempts_payload,
+        mod_quiz_get_attempt_review=quiz_review_payload,
+    )
+
+    review = client.get_quiz_review(42628)
+
+    attempts_call, review_call = (posted_params(c.request) for c in route.calls)
+    assert attempts_call["status"] == "finished"
+    assert review_call["attemptid"] == "700002"
+    assert review_call["page"] == "-1"
+    assert review.attempt == 2
+    assert review.marks == 1
+    assert review.max_marks == 2
+    assert [q.number for q in review.questions] == ["1", "2"]
+
+
+@respx.mock
+def test_get_quiz_review_picks_an_attempt_by_its_ordinal_not_its_id(
+    client: MoodleClient,
+    quiz_review_attempts_payload: dict[str, Any],
+    quiz_review_payload: dict[str, Any],
+) -> None:
+    route = route_by_function(
+        mod_quiz_get_user_attempts=quiz_review_attempts_payload,
+        mod_quiz_get_attempt_review=quiz_review_payload,
+    )
+
+    client.get_quiz_review(42628, attempt=1)
+
+    assert posted_params(route.calls[1].request)["attemptid"] == "700001"
+
+
+@respx.mock
+def test_get_quiz_review_names_a_missing_attempt_instead_of_returning_nothing(
+    client: MoodleClient, quiz_review_attempts_payload: dict[str, Any]
+) -> None:
+    route_by_function(mod_quiz_get_user_attempts=quiz_review_attempts_payload)
+
+    with pytest.raises(MoodleError, match="no attempt 3"):
+        client.get_quiz_review(42628, attempt=3)
+
+
+@respx.mock
+def test_get_quiz_review_raises_when_the_quiz_allows_no_review(
+    client: MoodleClient, quiz_review_attempts_payload: dict[str, Any]
+) -> None:
+    """The refusal arrives as HTTP 200 with an error body, never as an empty review."""
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_review_attempts_payload,
+        mod_quiz_get_attempt_review={"errorcode": "noreview", "message": "Not allowed"},
+    )
+
+    with pytest.raises(MoodleAPIError) as excinfo:
+        client.get_quiz_review(42628)
+    assert excinfo.value.errorcode == "noreview"
 
 
 @respx.mock

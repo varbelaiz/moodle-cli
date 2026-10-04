@@ -16,7 +16,7 @@ import pytest
 
 from moodle_cli.client import MoodleClient
 from moodle_cli.downloads import download_file, plan_downloads
-from moodle_cli.errors import MoodleAPIError
+from moodle_cli.errors import MoodleAPIError, MoodleError
 from moodle_cli.session import open_client
 
 pytestmark = pytest.mark.live
@@ -145,6 +145,26 @@ def test_get_quizzes_and_status_round_trip(live_client: MoodleClient) -> None:
     status = live_client.get_quiz_status(quizzes[0].id)
     assert status.attempt_count >= 0
     assert isinstance(status.has_grade, bool)
+
+
+def test_every_reviewable_attempt_parses_or_is_refused_as_noreview(
+    live_client: MoodleClient,
+) -> None:
+    """Each question type the campus uses must parse, and a refusal must name itself."""
+    reviewed = 0
+    for quiz in live_client.get_quizzes():
+        try:
+            review = live_client.get_quiz_review(quiz.id)
+        except MoodleAPIError as exc:
+            assert exc.errorcode == "noreview"
+            continue
+        except MoodleError:
+            continue  # no finished attempt
+        reviewed += 1
+        for question in review.questions:
+            assert question.prompt or question.answers or question.choices
+    if not reviewed:
+        pytest.skip("no quiz has a reviewable finished attempt")
 
 
 def test_get_grade_overview_always_succeeds(live_client: MoodleClient) -> None:

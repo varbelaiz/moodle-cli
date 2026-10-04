@@ -1,0 +1,21 @@
+{
+  "attempts": [
+    {
+      "id": 700001,
+      "quiz": 42628,
+      "attempt": 1,
+      "state": "finished",
+      "timestart": 1773000000,
+      "timefinish": 1773000300
+    },
+    {
+      "id": 700002,
+      "quiz": 42628,
+      "attempt": 2,
+      "state": "finished",
+      "timestart": 1773848006,
+      "timefinish": 1773848169
+    }
+  ],
+  "warnings": []
+}
