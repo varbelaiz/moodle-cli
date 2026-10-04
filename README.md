@@ -167,6 +167,8 @@ notes. An installed plugin adds a group of its own; `moodle plugins list` shows 
 | --- | --- | --- |
 | `moodle course quizzes` | `get_quizzes` | List a course's quizzes and their open/close windows. |
 | `moodle course quiz-status` | `get_quiz_status` | Show attempt count and best grade for one quiz. |
+| `moodle course quiz-review` | `get_quiz_review` | Show a finished attempt's questions, answers and feedback. |
+| `moodle course quiz-export` | — | Write every quiz of a course as markdown, one file each. |
 
 ### [Grades](docs/grades.md)
 
