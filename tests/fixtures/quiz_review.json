@@ -1,0 +1,38 @@
+{
+  "grade": "50",
+  "attempt": {
+    "id": 700002,
+    "quiz": 42628,
+    "attempt": 2,
+    "state": "finished",
+    "timestart": 1773848006,
+    "timefinish": 1773848169,
+    "sumgrades": 1
+  },
+  "additionaldata": [],
+  "questions": [
+    {
+      "slot": 1,
+      "type": "truefalse",
+      "page": 0,
+      "questionnumber": "1",
+      "number": 1,
+      "html": "<div class=\"que truefalse deferredfeedback correct\"><div class=\"info\"><h3 class=\"no\">Pregunta <span class=\"qno\">1</span></h3><div class=\"state\">Correcta</div><div class=\"grade\">Se puntúa 1.00 sobre 1.00</div></div><div class=\"content\"><div class=\"formulation clearfix\"><h4 class=\"accesshide\">Enunciado de la pregunta</h4><div class=\"qtext\"><p>Indicar si la afirmación es verdadera:</p><p>El río Paraná desemboca en el Río de la Plata.</p></div><fieldset class=\"ablock\"><legend class=\"prompt\"><span class=\"visually-hidden\">Pregunta 1</span> Seleccione una:</legend><div class=\"answer\"><div class=\"r0 correct\"><input type=\"radio\" name=\"q1:1_answer\" value=\"1\" disabled=\"disabled\" checked=\"checked\" /><label class=\"ms-1\">Verdadero</label> <i class=\"icon\" title=\"Correcta\"></i></div><div class=\"r1\"><input type=\"radio\" name=\"q1:1_answer\" value=\"0\" disabled=\"disabled\" /><label class=\"ms-1\">Falso</label></div></div></fieldset></div><div class=\"outcome clearfix\"><h4 class=\"accesshide\">Retroalimentación</h4><div class=\"feedback\"><div class=\"specificfeedback\"><p>Muy bien.</p></div><div class=\"generalfeedback\"><p>El Paraná y el Uruguay forman el Río de la Plata.</p></div><div class=\"rightanswer\">La respuesta correcta es 'Verdadero'</div></div></div></div></div>",
+      "status": "Correcta",
+      "state": "gradedright",
+      "mark": "1.00",
+      "maxmark": 1
+    },
+    {
+      "slot": 2,
+      "type": "truefalse",
+      "page": 0,
+      "questionnumber": "2",
+      "number": 2,
+      "html": "<div class=\"que truefalse deferredfeedback\"><div class=\"info\"><h3 class=\"no\">Pregunta <span class=\"qno\">2</span></h3><div class=\"state\">Finalizado</div></div><div class=\"content\"><div class=\"formulation clearfix\"><div class=\"qtext\"><p>¿Montevideo es la capital de Paraguay?</p></div><fieldset class=\"ablock\"><div class=\"answer\"><div class=\"r0\"><input type=\"radio\" name=\"q1:2_answer\" value=\"1\" disabled=\"disabled\" checked=\"checked\" /><label class=\"ms-1\">Verdadero</label></div><div class=\"r1\"><input type=\"radio\" name=\"q1:2_answer\" value=\"0\" disabled=\"disabled\" /><label class=\"ms-1\">Falso</label></div></div></fieldset></div></div></div>",
+      "status": "Finalizado",
+      "maxmark": 1
+    }
+  ],
+  "warnings": []
+}

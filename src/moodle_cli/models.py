@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from html import unescape
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, computed_field
 
 
 class _Base(BaseModel):
@@ -353,6 +353,28 @@ class ReviewQuestion(_Base):
     right_answer: str | None = None
     feedback: str | None = None
     general_feedback: str | None = None
+
+
+class QuizReview(_Base):
+    """A finished attempt with its questions, as ``mod_quiz_get_attempt_review`` shows it."""
+
+    quiz_id: int
+    attempt_id: int
+    #: The attempt's ordinal among the student's attempts at this quiz, from 1.
+    attempt: int
+    #: Marks earned, out of the questions' summed ``max_mark``; ``None`` when marks are hidden.
+    marks: float | None = None
+    timefinish: _Epoch = 0
+    questions: list[ReviewQuestion] = Field(default_factory=list)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def max_marks(self) -> float:
+        return sum(q.max_mark for q in self.questions)
+
+    @property
+    def finished_at(self) -> datetime | None:
+        return epoch_to_datetime(self.timefinish)
 
 
 class CourseGrade(_Base):
