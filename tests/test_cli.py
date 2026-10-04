@@ -856,6 +856,49 @@ def test_quiz_status_reports_attempts_and_grade(
 
 
 @respx.mock
+def test_quiz_review_shows_answers_and_feedback_and_leaves_out_withheld_parts(
+    quiz_review_attempts_payload: dict[str, Any], quiz_review_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_review_attempts_payload,
+        mod_quiz_get_attempt_review=quiz_review_payload,
+    )
+
+    result = runner.invoke(app, ["course", "quiz-review", "42628"])
+
+    assert result.exit_code == 0
+    first, second = result.output.split("## Question 2")
+    assert "Quiz 42628, attempt 2" in first
+    assert "Marks: 1 / 2" in first
+    assert "El río Paraná desemboca en el Río de la Plata." in first
+    assert "- Verdadero (correct)" in first
+    assert "La respuesta correcta es 'Verdadero'" in first
+    assert "Muy bien." in first
+    # The second question's quiz withholds correctness, the right answer and feedback.
+    assert "- Verdadero\n" in second
+    assert "Right answer" not in second
+    assert "Feedback" not in second
+
+
+@respx.mock
+def test_quiz_review_json_reports_a_withheld_part_as_null(
+    quiz_review_attempts_payload: dict[str, Any], quiz_review_payload: dict[str, Any]
+) -> None:
+    route_by_function(
+        mod_quiz_get_user_attempts=quiz_review_attempts_payload,
+        mod_quiz_get_attempt_review=quiz_review_payload,
+    )
+
+    result = runner.invoke(app, ["course", "quiz-review", "42628", "--json"])
+
+    hidden = json.loads(result.stdout)["questions"][1]
+    assert hidden["state"] is None
+    assert hidden["mark"] is None
+    assert hidden["right_answer"] is None
+    assert hidden["answers"] == [{"text": "Verdadero", "correct": None, "feedback": None}]
+
+
+@respx.mock
 def test_quiz_status_reports_no_attempts_before_the_quiz_is_taken() -> None:
     route_by_function(
         mod_quiz_get_user_attempts={"attempts": [], "warnings": []},
